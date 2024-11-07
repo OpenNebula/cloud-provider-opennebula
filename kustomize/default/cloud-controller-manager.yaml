@@ -1,0 +1,83 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloud-config
+  namespace: kube-system
+stringData:
+  config.yaml: |
+    opennebula:
+      ONE_XMLRPC: "${ONE_XMLRPC}"
+      ONE_AUTH: "${ONE_AUTH}"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opennebula-cloud-controller-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:opennebula-cloud-controller-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: opennebula-cloud-controller-manager
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: cloud-controller-manager
+  name: cloud-controller-manager
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      k8s-app: cloud-controller-manager
+  template:
+    metadata:
+      labels:
+        k8s-app: cloud-controller-manager
+    spec:
+      serviceAccountName: opennebula-cloud-controller-manager
+      containers:
+        - name: cloud-controller-manager
+          image: "${CCM_IMG}"
+          command:
+            - /opennebula-cloud-controller-manager
+            - --cloud-provider=opennebula
+            - --cloud-config=/etc/one/config.yaml
+            - --leader-elect=true
+            - --use-service-account-credentials
+            - --controllers=cloud-node,cloud-node-lifecycle
+          volumeMounts:
+            - name: cloud-config
+              mountPath: /etc/one/
+              readOnly: true
+      volumes:
+        - name: cloud-config
+          secret:
+            secretName: cloud-config
+      hostNetwork: true
+      tolerations:
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        # TODO: remove this one later!
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoSchedule
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
