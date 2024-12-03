@@ -20,34 +20,33 @@ import (
 	"context"
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
-
+	corev1 "k8s.io/api/core/v1"
 	cloudprovider "k8s.io/cloud-provider"
 
-	"github.com/OpenNebula/one/src/oca/go/src/goca"
+	goca "github.com/OpenNebula/one/src/oca/go/src/goca"
 	goca_vm "github.com/OpenNebula/one/src/oca/go/src/goca/schemas/vm"
 )
 
-type Instances struct {
-	rpc2 *goca.Client
+type InstancesV2 struct {
+	ctrl *goca.Controller
 }
 
-func NewInstances(cfg OpenNebulaConfig) (cloudprovider.InstancesV2, error) {
-	auth := goca.OneConfig{Endpoint: cfg.ONE_XMLRPC, Token: cfg.ONE_AUTH}
-	client := goca.NewDefaultClient(auth)
-	return &Instances{rpc2: client}, nil
+func NewInstancesV2(cfg OpenNebulaConfig) (cloudprovider.InstancesV2, error) {
+	auth := goca.OneConfig{Endpoint: cfg.Endpoint.ONE_XMLRPC, Token: cfg.Endpoint.ONE_AUTH}
+	ctrl := goca.NewController(goca.NewDefaultClient(auth))
+	return &InstancesV2{ctrl}, nil
 }
 
-func (i *Instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
-	vm, err := i.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
+func (i2 *InstancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bool, error) {
+	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return false, err
 	}
 	return vm != nil, nil
 }
 
-func (i *Instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
-	vm, err := i.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
+func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (bool, error) {
+	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return false, err
 	}
@@ -68,8 +67,8 @@ func (i *Instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, 
 	}
 }
 
-func (i *Instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
-	vm, err := i.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
+func (i2 *InstancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceMetadata, error) {
+	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +81,13 @@ func (i *Instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 		return nil, err
 	}
 
-	nodeAddresses := []v1.NodeAddress{
-		v1.NodeAddress{
-			Type:    v1.NodeInternalIP,
+	nodeAddresses := []corev1.NodeAddress{
+		corev1.NodeAddress{
+			Type:    corev1.NodeInternalIP,
 			Address: address4,
 		},
-		v1.NodeAddress{
-			Type:    v1.NodeExternalIP,
+		corev1.NodeAddress{
+			Type:    corev1.NodeExternalIP,
 			Address: address4,
 		},
 	}
@@ -102,8 +101,8 @@ func (i *Instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 	}, nil
 }
 
-func (i *Instances) byUUID(ctx context.Context, vmUUID string) (*goca_vm.VM, error) {
-	pool, err := goca.NewController(i.rpc2).VMs().InfoExtendedContext(ctx, -2)
+func (i2 *InstancesV2) byUUID(ctx context.Context, vmUUID string) (*goca_vm.VM, error) {
+	pool, err := i2.ctrl.VMs().InfoExtendedContext(ctx, -2)
 	if err != nil {
 		return nil, err
 	}

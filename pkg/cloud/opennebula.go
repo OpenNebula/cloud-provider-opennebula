@@ -29,7 +29,8 @@ const (
 )
 
 type OpenNebula struct {
-	instancesV2 cloudprovider.InstancesV2
+	instancesV2  cloudprovider.InstancesV2
+	loadBalancer cloudprovider.LoadBalancer
 }
 
 type Config struct {
@@ -37,8 +38,30 @@ type Config struct {
 }
 
 type OpenNebulaConfig struct {
+	Endpoint       OpenNebulaEndpoint `yaml:"endpoint"`
+	VirtualRouter  *ONEVirtualRouter  `yaml:"virtualRouter"`
+	PublicNetwork  *ONEVirtualNetwork `yaml:"publicNetwork,omitempty"`
+	PrivateNetwork *ONEVirtualNetwork `yaml:"privateNetwork,omitempty"`
+}
+
+type OpenNebulaEndpoint struct {
 	ONE_XMLRPC string `yaml:"ONE_XMLRPC"`
 	ONE_AUTH   string `yaml:"ONE_AUTH"`
+}
+
+type ONEVirtualRouter struct {
+	TemplateName string            `yaml:"templateName"`
+	Replicas     *int32            `yaml:"replicas,omitempty"`
+	ExtraContext map[string]string `yaml:"extraContext,omitempty"`
+}
+
+type ONEVirtualNetwork struct {
+	Name           string  `yaml:"name"`
+	AddressRangeID *int    `yaml:"addressRangeID,omitempty"`
+	FloatingIP     *string `yaml:"floatingIP,omitempty"`
+	FloatingOnly   *bool   `yaml:"floatingOnly,omitempty"`
+	Gateway        *string `yaml:"gateway,omitempty"`
+	DNS            *string `yaml:"dns,omitempty"`
 }
 
 func init() {
@@ -52,11 +75,18 @@ func init() {
 }
 
 func NewOpenNebula(cfg *Config) (cloudprovider.Interface, error) {
-	instances, err := NewInstances(cfg.OpenNebula)
+	instancesV2, err := NewInstancesV2(cfg.OpenNebula)
 	if err != nil {
 		return nil, err
 	}
-	return &OpenNebula{instancesV2: instances}, nil
+	loadBalancer, err := NewLoadBalancer(cfg.OpenNebula)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenNebula{
+		instancesV2:  instancesV2,
+		loadBalancer: loadBalancer,
+	}, nil
 }
 
 func ReadConfig(reader io.Reader) (*Config, error) {
@@ -74,7 +104,7 @@ func (one *OpenNebula) Initialize(builder cloudprovider.ControllerClientBuilder,
 }
 
 func (one *OpenNebula) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return nil, false
+	return one.loadBalancer, true
 }
 
 func (one *OpenNebula) Instances() (cloudprovider.Instances, bool) {
