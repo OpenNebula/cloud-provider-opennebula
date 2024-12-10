@@ -18,7 +18,6 @@ package opennebula
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"net"
 	"strconv"
@@ -61,15 +60,15 @@ func (lb *LoadBalancer) getLBReservationName(clusterName string) string {
 	return fmt.Sprintf("%s-lb", clusterName)
 }
 
-func (lb *LoadBalancer) findLoadBalancer(clusterName, lbName string) (*goca_vn.VirtualNetwork, int, error) {
-	vnID, err := lb.ctrl.VirtualNetworks().ByName(lb.getLBReservationName(clusterName))
+func (lb *LoadBalancer) findLoadBalancer(ctx context.Context, clusterName, lbName string) (*goca_vn.VirtualNetwork, int, error) {
+	vnID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getLBReservationName(clusterName))
 	if err != nil {
 		if err.Error() == "resource not found" {
 			return nil, -1, nil
 		}
 		return nil, -1, err
 	}
-	vn, err := lb.ctrl.VirtualNetwork(vnID).Info(true)
+	vn, err := lb.ctrl.VirtualNetwork(vnID).InfoContext(ctx, true)
 	if err != nil {
 		return nil, -1, err
 	}
@@ -92,7 +91,7 @@ func (lb *LoadBalancer) findLoadBalancer(clusterName, lbName string) (*goca_vn.V
 func (lb *LoadBalancer) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (*corev1.LoadBalancerStatus, bool, error) {
 	klog.Infof("GetLoadBalancer(): %s", clusterName)
 
-	vn, arIdx, err := lb.findLoadBalancer(clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
+	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
 		return nil, false, err
 	}
@@ -123,100 +122,94 @@ func (lb *LoadBalancer) getPrimaryNetwork() *ONEVirtualNetwork {
 	}
 }
 
-func (lb *LoadBalancer) ensureVRReservationCreated(clusterName string) (*goca_vn.VirtualNetwork, error) {
-	vnID, err := lb.ctrl.VirtualNetworks().ByName(lb.getVRReservationName(clusterName))
+func (lb *LoadBalancer) ensureVRReservationCreated(ctx context.Context, clusterName string) (*goca_vn.VirtualNetwork, error) {
+	vnID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getVRReservationName(clusterName))
 	if err != nil && err.Error() != "resource not found" {
 		return nil, err
 	}
-	if vnID >= 0 {
-		return lb.ctrl.VirtualNetwork(vnID).Info(true)
-	}
+	if vnID < 0 {
+		parentNetwork := lb.getPrimaryNetwork()
+		parentID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, parentNetwork.Name)
+		if err != nil {
+			return nil, err
+		}
 
-	parentNetwork := lb.getPrimaryNetwork()
-	parentID, err := lb.ctrl.VirtualNetworks().ByName(parentNetwork.Name)
-	if err != nil {
-		return nil, err
+		replicas := 1
+		if lb.virtualRouter.Replicas != nil {
+			replicas = int(*lb.virtualRouter.Replicas)
+		}
+		reserve := &goca_dyn.Template{}
+		reserve.AddPair("NAME", lb.getVRReservationName(clusterName))
+		reserve.AddPair("SIZE", replicas)
+		if parentNetwork.AddressRangeID != nil && *parentNetwork.AddressRangeID >= 0 {
+			reserve.AddPair("AR_ID", *parentNetwork.AddressRangeID)
+		} else {
+			// NOTE: Expecting ETHER type AR at AR_ID=1.
+			reserve.AddPair("AR_ID", 1)
+		}
+		vnID, err = lb.ctrl.VirtualNetwork(parentID).ReserveContext(ctx, reserve.String())
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	replicas := 1
-	if lb.virtualRouter.Replicas != nil {
-		replicas = int(*lb.virtualRouter.Replicas)
-	}
-	reserve := &goca_dyn.Template{}
-	reserve.AddPair("NAME", lb.getVRReservationName(clusterName))
-	reserve.AddPair("SIZE", replicas)
-	if parentNetwork.AddressRangeID != nil && *parentNetwork.AddressRangeID >= 0 {
-		reserve.AddPair("AR_ID", *parentNetwork.AddressRangeID)
-	} else {
-		// NOTE: Expecting ETHER type AR at AR_ID=1.
-		reserve.AddPair("AR_ID", 1)
-	}
-	vnID, err = lb.ctrl.VirtualNetwork(parentID).Reserve(reserve.String())
-	if err != nil {
-		return nil, err
-	}
-
-	return lb.ctrl.VirtualNetwork(vnID).Info(true)
+	return lb.ctrl.VirtualNetwork(vnID).InfoContext(ctx, true)
 }
 
-func (lb *LoadBalancer) ensureLBReservationCreated(clusterName, lbName string) (*goca_vn.VirtualNetwork, int, error) {
-	vn, arIdx, err := lb.findLoadBalancer(clusterName, lbName)
+func (lb *LoadBalancer) ensureLBReservationCreated(ctx context.Context, clusterName, lbName string) (*goca_vn.VirtualNetwork, int, error) {
+	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lbName)
 	if err != nil {
 		return nil, -1, err
 	}
-	if arIdx >= 0 {
-		return vn, arIdx, nil
-	}
+	if arIdx < 0 { // not found
+		parentNetwork := lb.getPrimaryNetwork()
+		parentID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, parentNetwork.Name)
+		if err != nil {
+			return nil, -1, err
+		}
 
-	parentNetwork := lb.getPrimaryNetwork()
-	parentID, err := lb.ctrl.VirtualNetworks().ByName(parentNetwork.Name)
-	if err != nil {
-		return nil, -1, err
-	}
+		template := &goca_dyn.Template{}
+		template.AddPair("NAME", lb.getLBReservationName(clusterName))
+		template.AddPair("SIZE", 1)
+		if parentNetwork.AddressRangeID != nil && *parentNetwork.AddressRangeID >= 0 {
+			template.AddPair("AR_ID", *parentNetwork.AddressRangeID)
+		} else {
+			// NOTE: Expecting non-ETHER type AR at AR_ID=0.
+			template.AddPair("AR_ID", 0)
+		}
+		if vn != nil {
+			template.AddPair("NETWORK_ID", vn.ID)
+		}
+		vnID, err := lb.ctrl.VirtualNetwork(parentID).ReserveContext(ctx, template.String())
+		if err != nil {
+			return nil, -1, err
+		}
+		vn, err = lb.ctrl.VirtualNetwork(vnID).InfoContext(ctx, true)
+		if err != nil {
+			return nil, -1, err
+		}
 
-	template := &goca_dyn.Template{}
-	template.AddPair("NAME", lb.getLBReservationName(clusterName))
-	template.AddPair("SIZE", 1)
-	if parentNetwork.AddressRangeID != nil && *parentNetwork.AddressRangeID >= 0 {
-		template.AddPair("AR_ID", *parentNetwork.AddressRangeID)
-	} else {
-		// NOTE: Expecting non-ETHER type AR at AR_ID=0.
-		template.AddPair("AR_ID", 0)
-	}
-	if vn != nil {
-		template.AddPair("NETWORK_ID", vn.ID)
-	}
-	vnID, err := lb.ctrl.VirtualNetwork(parentID).Reserve(template.String())
-	if err != nil {
-		return nil, -1, err
-	}
-	vn, err = lb.ctrl.VirtualNetwork(vnID).Info(true)
-	if err != nil {
-		return nil, -1, err
-	}
+		arIdx = len(vn.ARs) - 1
+		if arIdx >= 0 {
+			arVec := goca_dyn.NewVector("AR")
+			arVec.AddPair("AR_ID", vn.ARs[arIdx].ID)
+			arVec.AddPair("LB_NAME", lbName)
 
-	arIdx = len(vn.ARs) - 1
-	if arIdx >= 0 {
-		arVec := &goca_dyn.Vector{XMLName: xml.Name{Local: "AR"}}
-		arVec.AddPair("AR_ID", vn.ARs[arIdx].ID)
-		arVec.AddPair("LB_NAME", lbName)
+			if err := lb.ctrl.VirtualNetwork(vnID).UpdateARContext(ctx, arVec.String()); err != nil {
+				return nil, -1, err
+			}
+		}
 
-		if err := lb.ctrl.VirtualNetwork(vnID).UpdateAR(arVec.String()); err != nil {
+		vn, err = lb.ctrl.VirtualNetwork(vnID).InfoContext(ctx, true)
+		if err != nil {
+			return nil, -1, err
+		}
+
+		hold := goca_dyn.NewVector("LEASES")
+		hold.AddPair("IP", vn.ARs[len(vn.ARs)-1].IP)
+		if err := lb.ctrl.VirtualNetwork(vnID).HoldContext(ctx, hold.String()); err != nil {
 			return nil, -1, err
 		}
 	}
-
-	vn, err = lb.ctrl.VirtualNetwork(vnID).Info(true)
-	if err != nil {
-		return nil, -1, err
-	}
-
-	hold := &goca_dyn.Vector{XMLName: xml.Name{Local: "LEASES"}}
-	hold.AddPair("IP", vn.ARs[len(vn.ARs)-1].IP)
-	if err := lb.ctrl.VirtualNetwork(vnID).Hold(hold.String()); err != nil {
-		return nil, -1, err
-	}
-
 	return vn, arIdx, nil
 }
 
@@ -224,79 +217,84 @@ func (lb *LoadBalancer) getVirtualRouterName(clusterName string) string {
 	return fmt.Sprintf("%s-lb", clusterName)
 }
 
-func (lb *LoadBalancer) ensureVirtualRouterCreated(clusterName string) (*goca_vr.VirtualRouter, error) {
-	vrID, err := lb.ctrl.VirtualRouterByName(lb.getVirtualRouterName(clusterName))
+func (lb *LoadBalancer) ensureVirtualRouterCreated(ctx context.Context, clusterName string) (*goca_vr.VirtualRouter, error) {
+	vrID, err := lb.ctrl.VirtualRouterByNameContext(ctx, lb.getVirtualRouterName(clusterName))
 	if err != nil && err.Error() != "resource not found" {
 		return nil, err
 	}
-	if vrID >= 0 {
-		return lb.ctrl.VirtualRouter(vrID).Info(true)
-	}
-
-	vmTemplateID, err := lb.ctrl.Templates().ByName(lb.virtualRouter.TemplateName)
-	if err != nil {
-		return nil, err
-	}
-	vmTemplate, err := lb.ctrl.Template(vmTemplateID).Info(false, true)
-	if err != nil {
-		return nil, err
-	}
-
-	vrTemplate := goca_vr.NewTemplate()
-	vrTemplate.Add("NAME", lb.getVirtualRouterName(clusterName))
-	// Overwrite NIC 0 or 0 and 1, leave others intact.
-	nicIndex := -1
-	if lb.publicNetwork != nil {
-		nicIndex++
-		nicVec := ensureNIC(vrTemplate, nicIndex)
-		nicVec.AddPair("NETWORK", lb.getVRReservationName(clusterName))
-	}
-	if lb.privateNetwork != nil {
-		nicIndex++
-		nicVec := ensureNIC(vrTemplate, nicIndex)
-		nicVec.AddPair("NETWORK", lb.privateNetwork.Name)
-		nicVec.AddPair("FLOATING_IP", "YES")
-		if lb.privateNetwork.FloatingIP != nil && net.ParseIP(*lb.privateNetwork.FloatingIP) != nil {
-			nicVec.AddPair("IP", *lb.privateNetwork.FloatingIP)
+	if vrID < 0 {
+		vrTemplate := goca_vr.NewTemplate()
+		vrTemplate.Add("NAME", lb.getVirtualRouterName(clusterName))
+		// Overwrite NIC 0 or 0 and 1, leave others intact.
+		nicIndex := -1
+		if lb.publicNetwork != nil {
+			nicIndex++
+			nicVec := ensureNIC(vrTemplate, nicIndex)
+			nicVec.AddPair("NETWORK", lb.getVRReservationName(clusterName))
 		}
-		if lb.privateNetwork.FloatingOnly == nil || !*lb.privateNetwork.FloatingOnly {
-			nicVec.AddPair("FLOATING_ONLY", "NO")
-		} else {
-			nicVec.AddPair("FLOATING_ONLY", "YES")
+		if lb.privateNetwork != nil {
+			nicIndex++
+			nicVec := ensureNIC(vrTemplate, nicIndex)
+			nicVec.AddPair("NETWORK", lb.privateNetwork.Name)
+			nicVec.AddPair("FLOATING_IP", "YES")
+			if lb.privateNetwork.FloatingIP != nil && net.ParseIP(*lb.privateNetwork.FloatingIP) != nil {
+				nicVec.AddPair("IP", *lb.privateNetwork.FloatingIP)
+			}
+			if lb.privateNetwork.FloatingOnly == nil || !*lb.privateNetwork.FloatingOnly {
+				nicVec.AddPair("FLOATING_ONLY", "NO")
+			} else {
+				nicVec.AddPair("FLOATING_ONLY", "YES")
+			}
+		}
+		vrID, err = lb.ctrl.VirtualRouters().CreateContext(ctx, vrTemplate.String())
+		if err != nil {
+			return nil, err
 		}
 	}
-	vrID, err = lb.ctrl.VirtualRouters().Create(vrTemplate.String())
+	vr, err := lb.ctrl.VirtualRouter(vrID).InfoContext(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
-	contextVec, err := vmTemplate.Template.GetVector("CONTEXT")
-	if err != nil {
-		return nil, err
-	}
-	contextVec.Del("ONEAPP_VNF_HAPROXY_ENABLED")
-	contextVec.AddPair("ONEAPP_VNF_HAPROXY_ENABLED", "YES")
-	if lb.virtualRouter.ExtraContext != nil {
-		for k, v := range lb.virtualRouter.ExtraContext {
-			contextVec.Del(k)
-			contextVec.AddPair(k, v)
-		}
-	}
 	replicas := 1
 	if lb.virtualRouter.Replicas != nil {
 		replicas = int(*lb.virtualRouter.Replicas)
 	}
-	if _, err := lb.ctrl.VirtualRouter(vrID).Instantiate(
-		replicas,
-		vmTemplateID,
-		"",    // name
-		false, // hold
-		vmTemplate.Template.String(),
-	); err != nil {
-		return nil, err
+	if len(vr.VMs.ID) == 0 && replicas > 0 {
+		vmTemplateID, err := lb.ctrl.Templates().ByNameContext(ctx, lb.virtualRouter.TemplateName)
+		if err != nil {
+			return nil, err
+		}
+		vmTemplate, err := lb.ctrl.Template(vmTemplateID).InfoContext(ctx, false, true)
+		if err != nil {
+			return nil, err
+		}
+
+		contextVec, err := vmTemplate.Template.GetVector("CONTEXT")
+		if err != nil {
+			return nil, err
+		}
+		contextVec.Del("ONEAPP_VNF_HAPROXY_ENABLED")
+		contextVec.AddPair("ONEAPP_VNF_HAPROXY_ENABLED", "YES")
+		if lb.virtualRouter.ExtraContext != nil {
+			for k, v := range lb.virtualRouter.ExtraContext {
+				contextVec.Del(k)
+				contextVec.AddPair(k, v)
+			}
+		}
+		if _, err := lb.ctrl.VirtualRouter(vrID).InstantiateContext(
+			ctx,
+			replicas,
+			vmTemplateID,
+			"",    // name
+			false, // hold
+			vmTemplate.Template.String(),
+		); err != nil {
+			return nil, err
+		}
 	}
 
-	return lb.ctrl.VirtualRouter(vrID).Info(true)
+	return lb.ctrl.VirtualRouter(vrID).InfoContext(ctx, true)
 }
 
 func (lb *LoadBalancer) reindexLoadBalancers(vn *goca_vn.VirtualNetwork, contextVec *goca_dyn.Vector, update []map[string]string) {
@@ -358,9 +356,9 @@ func (lb *LoadBalancer) reindexLoadBalancers(vn *goca_vn.VirtualNetwork, context
 	}
 }
 
-func (lb *LoadBalancer) updateVirtualRouterInstances(vr *goca_vr.VirtualRouter, vn *goca_vn.VirtualNetwork, arIdx int, service *corev1.Service, nodes []*corev1.Node) error {
+func (lb *LoadBalancer) updateVirtualRouterInstances(ctx context.Context, vr *goca_vr.VirtualRouter, vn *goca_vn.VirtualNetwork, arIdx int, service *corev1.Service, nodes []*corev1.Node) error {
 	for _, vmID := range vr.VMs.ID {
-		vm, err := lb.ctrl.VM(vmID).Info(true)
+		vm, err := lb.ctrl.VM(vmID).InfoContext(ctx, true)
 		if err != nil {
 			return err
 		}
@@ -394,7 +392,7 @@ func (lb *LoadBalancer) updateVirtualRouterInstances(vr *goca_vr.VirtualRouter, 
 		}
 		lb.reindexLoadBalancers(vn, contextVec, update)
 
-		if err := lb.ctrl.VM(vmID).UpdateConf(vm.Template.String()); err != nil {
+		if err := lb.ctrl.VM(vmID).UpdateConfContext(ctx, vm.Template.String()); err != nil {
 			return err
 		}
 	}
@@ -405,20 +403,20 @@ func (lb *LoadBalancer) updateVirtualRouterInstances(vr *goca_vr.VirtualRouter, 
 func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	klog.Infof("EnsureLoadBalancer(): %s", clusterName)
 
-	_, err := lb.ensureVRReservationCreated(clusterName)
+	_, err := lb.ensureVRReservationCreated(ctx, clusterName)
 	if err != nil {
 		return nil, err
 	}
-	vn, arIdx, err := lb.ensureLBReservationCreated(clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
+	vn, arIdx, err := lb.ensureLBReservationCreated(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
 		return nil, err
 	}
 
-	vr, err := lb.ensureVirtualRouterCreated(clusterName)
+	vr, err := lb.ensureVirtualRouterCreated(ctx, clusterName)
 	if err != nil {
 		return nil, err
 	}
-	if err := lb.updateVirtualRouterInstances(vr, vn, arIdx, service, nodes); err != nil {
+	if err := lb.updateVirtualRouterInstances(ctx, vr, vn, arIdx, service, nodes); err != nil {
 		return nil, err
 	}
 
@@ -432,16 +430,16 @@ func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	klog.Infof("UpdateLoadBalancer(): %s", clusterName)
 
-	vrID, err := lb.ctrl.VirtualRouterByName(lb.getVirtualRouterName(clusterName))
+	vrID, err := lb.ctrl.VirtualRouterByNameContext(ctx, lb.getVirtualRouterName(clusterName))
 	if err != nil {
 		return err
 	}
-	vr, err := lb.ctrl.VirtualRouter(vrID).Info(true)
+	vr, err := lb.ctrl.VirtualRouter(vrID).InfoContext(ctx, true)
 	if err != nil {
 		return err
 	}
 
-	vn, arIdx, err := lb.findLoadBalancer(clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
+	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
 		return err
 	}
@@ -449,7 +447,7 @@ func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 		return nil
 	}
 
-	if err := lb.updateVirtualRouterInstances(vr, vn, arIdx, service, nodes); err != nil {
+	if err := lb.updateVirtualRouterInstances(ctx, vr, vn, arIdx, service, nodes); err != nil {
 		return err
 	}
 
@@ -459,7 +457,7 @@ func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 func (lb *LoadBalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
 	klog.Infof("EnsureLoadBalancerDeleted(): %s", clusterName)
 
-	vn, arIdx, err := lb.findLoadBalancer(clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
+	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
 		return err
 	}
@@ -473,58 +471,58 @@ func (lb *LoadBalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		if err != nil {
 			return err
 		}
-		release := &goca_dyn.Vector{XMLName: xml.Name{Local: "LEASES"}}
+		release := goca_dyn.NewVector("LEASES")
 		release.AddPair("IP", vn.ARs[arIdx].IP)
-		if err := lb.ctrl.VirtualNetwork(vn.ID).Release(release.String()); err != nil {
+		if err := lb.ctrl.VirtualNetwork(vn.ID).ReleaseContext(ctx, release.String()); err != nil {
 			return err
 		}
-		if err := lb.ctrl.VirtualNetwork(vn.ID).RmAR(arID); err != nil {
+		if err := lb.ctrl.VirtualNetwork(vn.ID).RmARContext(ctx, arID); err != nil {
 			return err
 		}
-		vn, err = lb.ctrl.VirtualNetwork(vn.ID).Info(true)
+		vn, err = lb.ctrl.VirtualNetwork(vn.ID).InfoContext(ctx, true)
 		if err != nil {
 			return err
 		}
 
-		vrID, err := lb.ctrl.VirtualRouterByName(lb.getVirtualRouterName(clusterName))
+		vrID, err := lb.ctrl.VirtualRouterByNameContext(ctx, lb.getVirtualRouterName(clusterName))
 		if err != nil {
 			return err
 		}
-		vr, err := lb.ctrl.VirtualRouter(vrID).Info(true)
+		vr, err := lb.ctrl.VirtualRouter(vrID).InfoContext(ctx, true)
 		if err != nil {
 			return err
 		}
-		if err := lb.updateVirtualRouterInstances(vr, vn, arIdx, service, nil); err != nil {
+		if err := lb.updateVirtualRouterInstances(ctx, vr, vn, arIdx, service, nil); err != nil {
 			return err
 		}
 	case 1: // Since this is the last item in the reservation then VR itself can be removed.
-		vrID, err := lb.ctrl.VirtualRouterByName(lb.getVirtualRouterName(clusterName))
+		vrID, err := lb.ctrl.VirtualRouterByNameContext(ctx, lb.getVirtualRouterName(clusterName))
 		if err != nil && err.Error() != "resource not found" {
 			return err
 		}
 		if vrID >= 0 {
-			if err := lb.ctrl.VirtualRouter(vrID).Delete(); err != nil {
+			if err := lb.ctrl.VirtualRouter(vrID).DeleteContext(ctx); err != nil {
 				return err
 			}
 		}
 
-		if vnID, err := lb.ctrl.VirtualNetworks().ByName(lb.getVRReservationName(clusterName)); err != nil {
+		if vnID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getVRReservationName(clusterName)); err != nil {
 			klog.Error(err)
 		} else {
-			if err = lb.ctrl.VirtualNetwork(vnID).Delete(); err != nil {
+			if err = lb.ctrl.VirtualNetwork(vnID).DeleteContext(ctx); err != nil {
 				return err
 			}
 		}
 
 		// The LB-reservation VN *must* be deleted last.
 		for _, ar := range vn.ARs {
-			release := &goca_dyn.Vector{XMLName: xml.Name{Local: "LEASES"}}
+			release := goca_dyn.NewVector("LEASES")
 			release.AddPair("IP", ar.IP)
-			if err := lb.ctrl.VirtualNetwork(vn.ID).Release(release.String()); err != nil {
+			if err := lb.ctrl.VirtualNetwork(vn.ID).ReleaseContext(ctx, release.String()); err != nil {
 				return err
 			}
 		}
-		if err := lb.ctrl.VirtualNetwork(vn.ID).Delete(); err != nil {
+		if err := lb.ctrl.VirtualNetwork(vn.ID).DeleteContext(ctx); err != nil {
 			return err
 		}
 	case 0: // Should never happen.

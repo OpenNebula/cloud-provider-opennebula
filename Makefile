@@ -1,8 +1,12 @@
 -include .env
 export
 
-# Image URL to use all building/pushing image targets
+# Local image URL used for building/pushing image targets
 CCM_IMG ?= localhost:5005/cloud-provider-opennebula:latest
+
+# Image tag/URL used for publising the provider
+RELEASE_TAG ?= latest
+RELEASE_IMG ?= ghcr.io/opennebula/cloud-provider-opennebula:${RELEASE_TAG}
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -34,6 +38,10 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: test
+test:
+	go test ./... -v -count=1
+
 ##@ Build
 
 .PHONY: build
@@ -41,12 +49,17 @@ build: fmt vet ## Build manager binary.
 	go build -o bin/opennebula-cloud-controller-manager cmd/opennebula-cloud-controller-manager/main.go
 
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build:
 	$(CONTAINER_TOOL) build -t ${CCM_IMG} .
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
+docker-push:
 	$(CONTAINER_TOOL) push ${CCM_IMG}
+
+.PHONY: docker-publish
+docker-publish: docker-build
+	$(CONTAINER_TOOL) tag ${CCM_IMG} ${RELEASE_IMG}
+	$(CONTAINER_TOOL) push ${RELEASE_IMG}
 
 ##@ Deployment
 
