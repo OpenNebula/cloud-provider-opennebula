@@ -17,7 +17,6 @@ limitations under the License.
 package opennebula
 
 import (
-	"encoding/xml"
 	"unsafe"
 
 	goca_dyn "github.com/OpenNebula/one/src/oca/go/src/goca/dynamic"
@@ -56,7 +55,7 @@ func ensureNIC(maybeTemplate interface{}, index int) *goca_dyn.Vector {
 	} else {
 		var nicVec *goca_dyn.Vector
 		for k := len(nics); k <= index; k++ {
-			nicVec = &goca_dyn.Vector{XMLName: xml.Name{Local: "NIC"}}
+			nicVec = goca_dyn.NewVector("NIC")
 			template.Elements = append(template.Elements, nicVec)
 		}
 		return nicVec

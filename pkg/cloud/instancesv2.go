@@ -32,8 +32,10 @@ type InstancesV2 struct {
 }
 
 func NewInstancesV2(cfg OpenNebulaConfig) (cloudprovider.InstancesV2, error) {
-	auth := goca.OneConfig{Endpoint: cfg.Endpoint.ONE_XMLRPC, Token: cfg.Endpoint.ONE_AUTH}
-	ctrl := goca.NewController(goca.NewDefaultClient(auth))
+	ctrl := goca.NewController(goca.NewDefaultClient(goca.OneConfig{
+		Endpoint: cfg.Endpoint.ONE_XMLRPC,
+		Token:    cfg.Endpoint.ONE_AUTH,
+	}))
 	return &InstancesV2{ctrl}, nil
 }
 
@@ -51,7 +53,7 @@ func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) 
 		return false, err
 	}
 	if vm == nil {
-		return false, fmt.Errorf("Not found")
+		return false, fmt.Errorf("instance not found")
 	}
 
 	state, _, err := vm.State()
@@ -73,7 +75,7 @@ func (i2 *InstancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) 
 		return nil, err
 	}
 	if vm == nil {
-		return nil, fmt.Errorf("Not found")
+		return nil, fmt.Errorf("instance not found")
 	}
 
 	address4, err := vm.Template.GetStrFromVec("CONTEXT", "ETH0_IP")
