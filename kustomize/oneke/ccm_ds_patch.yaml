@@ -1,0 +1,14 @@
+- op: add
+  path: /spec/template/spec/tolerations/-
+  target:
+      kind: DaemonSet
+      name: cloud-controller-manager
+  value:
+    key: CriticalAddonsOnly
+    operator: Equal
+    value: "true"
+    effect: NoExecute
+- op: replace
+  path: /spec/template/spec/nodeSelector
+  value:
+    node-role.kubernetes.io/control-plane: "true"
