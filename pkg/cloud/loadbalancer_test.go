@@ -90,6 +90,40 @@ var lbSinglePort = []lbStep{
 	},
 }
 
+// Ignore service with defined LB class.
+var lbMismatchedClass = []lbStep{
+	lbSinglePort[0],
+	lbStep{
+		destroy: false,
+		services: []*corev1.Service{
+			&corev1.Service{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "v1",
+					Kind:       "Service",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "Service0",
+				},
+				Spec: corev1.ServiceSpec{
+					Type:              "LoadBalancer",
+					LoadBalancerClass: &[]string{"asd"}[0], // other than default (nil)
+					Ports: []corev1.ServicePort{
+						corev1.ServicePort{
+							Name:     "http",
+							Protocol: "TCP",
+							Port:     8080,
+							NodePort: 30001,
+						},
+					},
+				},
+				Status: corev1.ServiceStatus{},
+			},
+		},
+		nodes:   lbSinglePort[0].nodes,
+		context: lbSinglePort[0].context,
+	},
+}
+
 // Create a Service, then modify an existing Port.
 var lbModifyPort = []lbStep{
 	lbSinglePort[0],
@@ -266,6 +300,10 @@ func (s *CPTestSuite) TestLBSinglePort() {
 	s.testLB("lbSinglePort", lbSinglePort)
 }
 
+func (s *CPTestSuite) TestLBMismatchedClass() {
+	s.testLB("lbMismatchedClass", lbMismatchedClass)
+}
+
 func (s *CPTestSuite) TestLBModifyPort() {
 	s.testLB("lbModifyPort", lbModifyPort)
 }
@@ -295,7 +333,7 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 					if err != nil {
 						s.T().Log(err)
 					}
-					return err == nil
+					return err == nil || err.Error() == "lb class unexpected"
 				})
 			} else {
 				retryF(defaultRetries, func() bool {
@@ -303,13 +341,12 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 					if err != nil {
 						s.T().Log(err)
 					}
-					return err == nil
+					return err == nil || err.Error() == "lb class unexpected"
 				})
 			}
 		}
 		assert.Nil(s.T(), s.verifyVRContextVec(name, step.context))
 	}
-	// Cleanup
 	for _, step := range steps {
 		for _, service := range step.services {
 			retryF(defaultRetries, func() bool {
@@ -317,7 +354,7 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 				if err != nil {
 					s.T().Log(err)
 				}
-				return err == nil
+				return err == nil || err.Error() == "lb class unexpected"
 			})
 		}
 	}

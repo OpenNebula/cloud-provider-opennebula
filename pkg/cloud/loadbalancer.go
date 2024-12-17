@@ -91,6 +91,10 @@ func (lb *LoadBalancer) findLoadBalancer(ctx context.Context, clusterName, lbNam
 func (lb *LoadBalancer) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (*corev1.LoadBalancerStatus, bool, error) {
 	klog.Infof("GetLoadBalancer(): %s", clusterName)
 
+	if service.Spec.LoadBalancerClass != nil {
+		return nil, false, nil
+	}
+
 	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
 		return nil, false, err
@@ -403,6 +407,10 @@ func (lb *LoadBalancer) updateVirtualRouterInstances(ctx context.Context, vr *go
 func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	klog.Infof("EnsureLoadBalancer(): %s", clusterName)
 
+	if service.Spec.LoadBalancerClass != nil {
+		return nil, fmt.Errorf("lb class unexpected")
+	}
+
 	_, err := lb.ensureVRReservationCreated(ctx, clusterName)
 	if err != nil {
 		return nil, err
@@ -430,6 +438,10 @@ func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	klog.Infof("UpdateLoadBalancer(): %s", clusterName)
 
+	if service.Spec.LoadBalancerClass != nil {
+		return fmt.Errorf("lb class unexpected")
+	}
+
 	vrID, err := lb.ctrl.VirtualRouterByNameContext(ctx, lb.getVirtualRouterName(clusterName))
 	if err != nil {
 		return err
@@ -456,6 +468,10 @@ func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 
 func (lb *LoadBalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
 	klog.Infof("EnsureLoadBalancerDeleted(): %s", clusterName)
+
+	if service.Spec.LoadBalancerClass != nil {
+		return fmt.Errorf("lb class unexpected")
+	}
 
 	vn, arIdx, err := lb.findLoadBalancer(ctx, clusterName, lb.GetLoadBalancerName(ctx, clusterName, service))
 	if err != nil {
