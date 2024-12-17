@@ -69,11 +69,11 @@ endif
 
 .PHONY: deploy
 deploy: kustomize envsubst kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build kustomize/default/ | $(ENVSUBST) | $(KUBECTL) apply -f-
+	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) apply -f-
 
 .PHONY: undeploy
 undeploy: kustomize envsubst kubectl ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build kustomize/default/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
+	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
 
 ##@ Dependencies
 
