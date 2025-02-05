@@ -1,6 +1,9 @@
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
+
+bin/
+.env
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -19,9 +22,6 @@ Dockerfile.cross
 # Go workspace file
 go.work
 go.work.sum
-
-# env file
-.env
 
 # editor and IDE paraphernalia
 .idea

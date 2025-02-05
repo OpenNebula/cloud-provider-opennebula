@@ -1,19 +1,32 @@
--include .env
-export
+SELF := $(patsubst %/,%,$(dir $(abspath $(firstword $(MAKEFILE_LIST)))))
+PATH := $(SELF)/bin:$(PATH)
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN := $(shell go env GOPATH)/bin
+else
+GOBIN := $(shell go env GOBIN)
+endif
+
+ENVSUBST  := $(SELF)/bin/envsubst
+KUBECTL   := $(SELF)/bin/kubectl
+KUSTOMIZE := $(SELF)/bin/kustomize
+
+ENVSUBST_VERSION  ?= 1.4.2
+KUBECTL_VERSION   ?= 1.31.4
+KUSTOMIZE_VERSION ?= 5.6.0
 
 # Local image URL used for building/pushing image targets
 CCM_IMG ?= localhost:5005/cloud-provider-opennebula:latest
 
 # Image tag/URL used for publising the provider
 RELEASE_TAG ?= latest
-RELEASE_IMG ?= ghcr.io/opennebula/cloud-provider-opennebula:${RELEASE_TAG}
-
-# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
-ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
-else
-GOBIN=$(shell go env GOBIN)
-endif
+RELEASE_IMG ?= ghcr.io/opennebula/cloud-provider-opennebula:$(RELEASE_TAG)
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -21,93 +34,77 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
-# Setting SHELL to bash allows bash commands to be executed by recipes.
-# Options are set to exit when a recipe line exits non-zero or a piped command fails.
-SHELL = /usr/bin/env bash -o pipefail
-.SHELLFLAGS = -ec
+-include .env
+export
 
-.PHONY: all
+.PHONY: all clean
 
-##@ Development
+all: build
 
-.PHONY: fmt
-fmt: ## Run go fmt against code.
+clean:
+	rm --preserve-root -rf '$(SELF)/bin/'
+
+# Development
+
+.PHONY: fmt vet test
+
+fmt:
 	go fmt ./...
 
-.PHONY: vet
-vet: ## Run go vet against code.
+vet:
 	go vet ./...
 
-.PHONY: test
 test:
 	go test ./... -v -count=1
 
-##@ Build
+# Build
 
-.PHONY: build
-build: fmt vet ## Build manager binary.
+.PHONY: build docker-build docker-push docker-publish
+
+build: fmt vet
 	go build -o bin/opennebula-cloud-controller-manager cmd/opennebula-cloud-controller-manager/main.go
 
-.PHONY: docker-build
 docker-build:
-	$(CONTAINER_TOOL) build -t ${CCM_IMG} .
+	$(CONTAINER_TOOL) build -t $(CCM_IMG) .
 
-.PHONY: docker-push
 docker-push:
-	$(CONTAINER_TOOL) push ${CCM_IMG}
+	$(CONTAINER_TOOL) push $(CCM_IMG)
 
-.PHONY: docker-publish
 docker-publish: docker-build
-	$(CONTAINER_TOOL) tag ${CCM_IMG} ${RELEASE_IMG}
-	$(CONTAINER_TOOL) push ${RELEASE_IMG}
+	$(CONTAINER_TOOL) tag $(CCM_IMG) $(RELEASE_IMG)
+	$(CONTAINER_TOOL) push $(RELEASE_IMG)
 
-##@ Deployment
+# Deployment
 
 ifndef ignore-not-found
-  ignore-not-found = false
+ignore-not-found := false
 endif
 
-.PHONY: deploy
-deploy: kustomize envsubst kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+.PHONY: deploy undeploy
+
+deploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) apply -f-
 
-.PHONY: undeploy
-undeploy: kustomize envsubst kubectl ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+undeploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
 
-##@ Dependencies
+# Dependencies
 
-## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	install -d $(LOCALBIN)
+.PHONY: envsubst kubectl kustomize
 
-## Tool Binaries
-ENVSUBST ?= $(LOCALBIN)/envsubst
-KUBECTL ?= $(LOCALBIN)/kubectl
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
-
-## Tool Versions
-ENVSUBST_VERSION ?= 1.4.2
-KUBECTL_VERSION ?= 1.31.1
-KUSTOMIZE_VERSION ?= 5.4.3
-
-.PHONY: envsubst
 envsubst: $(ENVSUBST)
-$(ENVSUBST): $(LOCALBIN)
+$(ENVSUBST):
 	$(call go-install-tool,$(ENVSUBST),github.com/a8m/envsubst/cmd/envsubst,v$(ENVSUBST_VERSION))
 
-.PHONY: kubectl
 kubectl: $(KUBECTL)
-$(KUBECTL): $(LOCALBIN)
+$(KUBECTL):
 	@[ -f $@-v$(KUBECTL_VERSION) ] || \
 	{ curl -fsSL https://dl.k8s.io/release/v$(KUBECTL_VERSION)/bin/linux/amd64/kubectl \
 	| install -m u=rwx,go= -o $(USER) -D /dev/fd/0 $@-v$(KUBECTL_VERSION); }
 	@ln -sf $@-v$(KUBECTL_VERSION) $@
 
-.PHONY: kustomize
 kustomize: $(KUSTOMIZE)
-$(KUSTOMIZE): $(LOCALBIN)
+$(KUSTOMIZE):
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,v$(KUSTOMIZE_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
@@ -120,7 +117,7 @@ set -e; \
 package=$(2)@$(3); \
 echo "Downloading $${package}"; \
 rm -f $(1) ||:; \
-GOBIN=$(LOCALBIN) go install $${package}; \
+GOBIN=$(SELF)/bin go install $${package}; \
 mv $(1) $(1)-$(3); \
 }; \
 ln -sf $(1)-$(3) $(1)
