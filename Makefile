@@ -13,20 +13,21 @@ else
 GOBIN := $(shell go env GOBIN)
 endif
 
-ENVSUBST  := $(SELF)/bin/envsubst
-KUBECTL   := $(SELF)/bin/kubectl
-KUSTOMIZE := $(SELF)/bin/kustomize
-
 ENVSUBST_VERSION  ?= 1.4.2
 KUBECTL_VERSION   ?= 1.31.4
 KUSTOMIZE_VERSION ?= 5.6.0
 
+ENVSUBST  := $(SELF)/bin/envsubst
+KUBECTL   := $(SELF)/bin/kubectl
+KUSTOMIZE := $(SELF)/bin/kustomize
+
+CLOSEST_TAG ?= $(shell git -C $(SELF) describe --tags --abbrev=0)
+
 # Local image URL used for building/pushing image targets
 CCM_IMG ?= localhost:5005/cloud-provider-opennebula:latest
 
-# Image tag/URL used for publising the provider
-RELEASE_TAG ?= latest
-RELEASE_IMG ?= ghcr.io/opennebula/cloud-provider-opennebula:$(RELEASE_TAG)
+# Image URL to use for building/pushing image targets
+IMG_URL ?= ghcr.io/opennebula/cloud-provider-opennebula
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -59,7 +60,7 @@ test:
 
 # Build
 
-.PHONY: build docker-build docker-push docker-publish
+.PHONY: build docker-build docker-push docker-release
 
 build: fmt vet
 	go build -o bin/opennebula-cloud-controller-manager cmd/opennebula-cloud-controller-manager/main.go
@@ -70,28 +71,18 @@ docker-build:
 docker-push:
 	$(CONTAINER_TOOL) push $(CCM_IMG)
 
-docker-publish: docker-build
-	$(CONTAINER_TOOL) tag $(CCM_IMG) $(RELEASE_IMG)
-	$(CONTAINER_TOOL) push $(RELEASE_IMG)
+# _PLATFORMS defines the target platforms for the manager image be built to provide support to multiple architectures.
+# To use this option you need to:
+# - be able to use docker buildx (https://docs.docker.com/reference/cli/docker/buildx/)
+# - have enabled BuildKit (https://docs.docker.com/build/buildkit/)
+# - be able to push the image to your registry
+_PLATFORMS ?= linux/amd64,linux/arm64
 
-# _PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/reference/cli/docker/buildx/
-# - have enabled BuildKit. More info:h ttps://docs.docker.com/build/buildkit/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-# NOTE: BUILDPLATFORM is a Docker BuildKit build-time variable that represents the platform (architecture/OS) on which the build is running (for example, linux/amd64).
-# More info: https://docs.docker.com/build/building/multi-platform/#automatic-platform-args-in-the-global-scope
-_PLATFORMS ?= linux/arm64,linux/amd64
-.PHONY: docker-multiarch-build-and-push
-docker-multiarch-build-and-push: ## Build and push docker image for the manager for cross-platform support)
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile (https://docs.docker.com/build/building/multi-platform/#cross-compilation)
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name cloud-provider-opennebula-builder
+docker-release:
+	-$(CONTAINER_TOOL) buildx create --name cloud-provider-opennebula-builder
 	$(CONTAINER_TOOL) buildx use cloud-provider-opennebula-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(_PLATFORMS) --tag ${CCM_IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm cloud-provider-opennebula-builder
-	rm Dockerfile.cross
+	$(CONTAINER_TOOL) buildx build --push --platform=$(_PLATFORMS) -t $(IMG_URL):$(CLOSEST_TAG) -t $(IMG_URL):latest -f Dockerfile .
+	-$(CONTAINER_TOOL) buildx rm cloud-provider-opennebula-builder
 
 # Deployment
 
