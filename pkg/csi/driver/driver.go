@@ -16,10 +16,13 @@ limitations under the License.
 package driver
 
 import (
+	"os"
 	"sync"
 
 	"github.com/OpenNebula/cloud-provider-opennebula/pkg/csi/config"
+	"github.com/OpenNebula/cloud-provider-opennebula/pkg/csi/opennebula"
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 	"k8s.io/utils/exec"
 )
@@ -27,6 +30,7 @@ import (
 const (
 	DefaultDriverName         = "csi.opennebula.io" //TODO: get from a repo metadata file or from a build flag
 	DefaultGRPCServerEndpoint = "unix:///tmp/csi.sock"
+	DefaultVolumeSizeBytes    = 1 * 1024 * 1024 * 1024
 )
 
 var (
@@ -81,11 +85,22 @@ func (d *Driver) Run() {
 		exec.New(),
 	)
 
+	oneClient := opennebula.NewClient(opennebula.OpenNebulaConfig{
+		Endpoint:    os.Getenv("ONE_XMLRPC"),
+		Credentials: os.Getenv("ONE_AUTH"),
+	})
+
+	volumeProvider, err := opennebula.NewPersistentDiskVolumeProvider(oneClient)
+	if err != nil || volumeProvider == nil {
+		klog.Fatalf("Failed to create PersistentDiskVolumeProvider: %v", err)
+		return
+	}
+
 	grpcServer.Start(
 		d.grpcServerEndpoint,
 		NewIdentityServer(d),
 		NewNodeServer(d, mounter),
-		NewControllerServer(d),
+		NewControllerServer(d, volumeProvider),
 	)
 
 	grpcServer.Wait()
