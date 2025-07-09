@@ -42,6 +42,9 @@ type OpenNebulaVolumeProvider interface {
 	DetachVolume(ctx context.Context, volume string, node string) error
 	ListVolumes(ctx context.Context, volume string) ([]string, error)
 	GetCapacity(ctx context.Context) (int64, error)
+	DuplicatedVolume(ctx context.Context, volume string) (int, int, error)
+	VolumeExists(ctx context.Context, volume int) bool
+	NodeExists(ctx context.Context, node string) bool
 }
 
 func NewClient(config OpenNebulaConfig) *OpenNebulaClient {

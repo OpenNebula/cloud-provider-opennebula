@@ -29,7 +29,10 @@ import (
 	"github.com/OpenNebula/one/src/oca/go/src/goca/schemas/vm"
 )
 
-const owner_tag = "OWNER"
+const (
+	owner_tag       = "OWNER"
+	size_conversion = 1024 * 1024
+)
 
 type PersistentDiskVolumeProvider struct {
 	ctrl *goca.Controller
@@ -52,7 +55,7 @@ func (p *PersistentDiskVolumeProvider) CreateVolume(ctx context.Context, name st
 	}
 
 	// size is in bytes and we need it in MB
-	sizeMB := size / (1024 * 1024)
+	sizeMB := size / size_conversion
 	if sizeMB <= 0 {
 		return -1, fmt.Errorf("invalid volume size: must be greater than 0 MB")
 	}
@@ -72,18 +75,21 @@ func (p *PersistentDiskVolumeProvider) CreateVolume(ctx context.Context, name st
 }
 
 func (p *PersistentDiskVolumeProvider) DeleteVolume(ctx context.Context, volume string) error {
-	if volume == "" {
-		return fmt.Errorf("invalid volume format")
-	}
-
 	id, err := strconv.Atoi(volume)
-	if err != nil {
-		return fmt.Errorf("invalid volume ID format: %w", err)
+	if err != nil || !p.VolumeExists(ctx, id) {
+		return nil
 	}
 
-	if err := p.ctrl.Image(id).Delete(); err != nil {
-		return fmt.Errorf("failed to delete existing volume: %w", err)
+	image, err := p.ctrl.Image(id).Info(true)
+	if err == nil {
+		state, err := image.State()
+		if err == nil && state == img.Used {
+			return fmt.Errorf("cannot delete volume %s, it is currently in use", volume)
+		}
 	}
+
+	// Force delete
+	p.ctrl.Client.CallContext(ctx, "one.image.delete", id, true)
 	return nil
 }
 
@@ -225,4 +231,32 @@ func (p *PersistentDiskVolumeProvider) NodeReady(node string) (bool, error) {
 	}
 
 	return vmLCMState == vm.Running, nil
+}
+
+func (p *PersistentDiskVolumeProvider) DuplicatedVolume(ctx context.Context, volume string) (int, int, error) {
+	images, err := p.ctrl.Images().Info()
+	if err != nil {
+		return -1, -1, fmt.Errorf("failed to list volumes: %w", err)
+	}
+	for _, img := range images.Images {
+		if img.Name == volume {
+			sizeBytes := img.Size * size_conversion
+			return img.ID, sizeBytes, nil
+		}
+	}
+	return -1, -1, nil
+}
+
+func (p *PersistentDiskVolumeProvider) VolumeExists(ctx context.Context, volume int) bool {
+	_, err := p.ctrl.Image(volume).Info(true)
+	return err == nil
+}
+
+func (p *PersistentDiskVolumeProvider) NodeExists(ctx context.Context, node string) bool {
+	id, err := strconv.Atoi(node)
+	if err != nil {
+		return false
+	}
+	_, err = p.ctrl.VM(id).Info(true)
+	return err == nil
 }

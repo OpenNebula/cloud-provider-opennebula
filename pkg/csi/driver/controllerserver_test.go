@@ -83,6 +83,8 @@ func TestCreateVolume(t *testing.T) {
 			},
 			expectError: false,
 			setupMock: func(m *MockOpenNebulaVolumeProviderTestify) {
+				m.On("DuplicatedVolume", mock.Anything, "test-volume").
+					Return(-1, 0, nil)
 				m.On("CreateVolume", mock.Anything, "test-volume", volumeSize, mock.Anything).
 					Return(1, nil)
 			},
@@ -211,7 +213,7 @@ func TestControllerPublishVolume(t *testing.T) {
 		{
 			name: "TestBasicVolumeAttach",
 			controllerPublishVolumeRequest: &csi.ControllerPublishVolumeRequest{
-				VolumeId: "test-volume-id",
+				VolumeId: "1234",
 				NodeId:   "test-node-id",
 				VolumeCapability: &csi.VolumeCapability{
 					AccessType: &csi.VolumeCapability_Mount{
@@ -225,7 +227,9 @@ func TestControllerPublishVolume(t *testing.T) {
 				},
 			},
 			setupMock: func(m *MockOpenNebulaVolumeProviderTestify) {
-				m.On("AttachVolume", mock.Anything, "test-volume-id", "test-node-id").Return(nil)
+				m.On("VolumeExists", mock.Anything, 1234).Return(true)
+				m.On("NodeExists", mock.Anything, "test-node-id").Return(true)
+				m.On("AttachVolume", mock.Anything, "1234", "test-node-id").Return(nil)
 			},
 			expectResponse: &csi.ControllerPublishVolumeResponse{},
 			expectError:    false,
@@ -455,4 +459,19 @@ func (m *MockOpenNebulaVolumeProviderTestify) ListVolumes(ctx context.Context, v
 func (m *MockOpenNebulaVolumeProviderTestify) GetCapacity(ctx context.Context) (int64, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockOpenNebulaVolumeProviderTestify) DuplicatedVolume(ctx context.Context, volume string) (int, int, error) {
+	args := m.Called(ctx, volume)
+	return args.Int(0), args.Int(1), args.Error(2)
+}
+
+func (m *MockOpenNebulaVolumeProviderTestify) VolumeExists(ctx context.Context, volume int) bool {
+	args := m.Called(ctx, volume)
+	return args.Bool(0)
+}
+
+func (m *MockOpenNebulaVolumeProviderTestify) NodeExists(ctx context.Context, node string) bool {
+	args := m.Called(ctx, node)
+	return args.Bool(0)
 }
