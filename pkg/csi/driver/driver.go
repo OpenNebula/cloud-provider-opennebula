@@ -16,7 +16,6 @@ limitations under the License.
 package driver
 
 import (
-	"os"
 	"sync"
 
 	"github.com/OpenNebula/cloud-provider-opennebula/pkg/csi/config"
@@ -69,6 +68,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		version:            driverVersion,
 		nodeID:             options.NodeID,
 		grpcServerEndpoint: options.GRPCServerEndpoint,
+		PluginConfig:       options.PluginConfig,
 	}
 
 	//TODO: Initialize volumeLocks
@@ -85,12 +85,23 @@ func (d *Driver) Run() {
 		exec.New(),
 	)
 
-	oneClient := opennebula.NewClient(opennebula.OpenNebulaConfig{
-		Endpoint:    os.Getenv("ONE_XMLRPC"),
-		Credentials: os.Getenv("ONE_AUTH"),
-	})
+	endpoint, ok := d.PluginConfig.GetString(config.OpenNebulaRPCEndpointVar)
+	if !ok {
+		klog.Fatalf("Failed to get %s endpoint from config", config.OpenNebulaRPCEndpointVar)
+		return
+	}
 
-	volumeProvider, err := opennebula.NewPersistentDiskVolumeProvider(oneClient)
+	credentials, ok := d.PluginConfig.GetString(config.OpenNebulaCredentialsVar)
+	if !ok {
+		klog.Fatalf("Failed to get %s credentials from config", config.OpenNebulaCredentialsVar)
+		return
+	}
+
+	volumeProvider, err := opennebula.NewPersistentDiskVolumeProvider(
+		opennebula.NewClient(opennebula.OpenNebulaConfig{
+			Endpoint:    endpoint,
+			Credentials: credentials,
+		}))
 	if err != nil || volumeProvider == nil {
 		klog.Fatalf("Failed to create PersistentDiskVolumeProvider: %v", err)
 		return
