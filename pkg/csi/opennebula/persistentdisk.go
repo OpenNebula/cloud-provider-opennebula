@@ -109,7 +109,10 @@ func (p *PersistentDiskVolumeProvider) AttachVolume(ctx context.Context, volume 
 	disk := shared.NewDisk()
 	disk.Add(shared.ImageID, volumeID)
 
-	p.ctrl.VM(nodeID).DiskAttach(disk.String())
+	err = p.ctrl.VM(nodeID).DiskAttach(disk.String())
+	if err != nil {
+		return fmt.Errorf("failed to attach volume %s to node %s: %w", volume, node, err)
+	}
 	return nil
 }
 
