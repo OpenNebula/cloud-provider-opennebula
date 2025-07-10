@@ -31,6 +31,11 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
+            - name: ONE_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: csi-opennebula-auth
+                  key: credentials
           volumeMounts:
             - name: csi-socket-dir
               mountPath: /csi
