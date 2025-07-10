@@ -24,8 +24,8 @@ spec:
       containers:
         # Node server container
         - name: opennebula-csi-plugin
-          image: ghcr.io/opennebula/opennebula-csi-plugin:latest #TODO: parameterize with kustomize?
-          imagePullPolicy: Always # IfNotPresent if we are using a non latest tag
+          image: ghcr.io/opennebula/opennebula-csi-plugin:latest #TODO: parameterize
+          imagePullPolicy: Always # TODO: parameterize
           args:
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--nodeid=$(NODE_ID)"
