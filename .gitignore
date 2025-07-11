@@ -2,6 +2,7 @@
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 
 bin/
+_deploy/
 .env
 
 # Binaries for programs and plugins
