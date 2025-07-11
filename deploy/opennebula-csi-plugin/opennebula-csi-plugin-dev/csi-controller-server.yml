@@ -70,6 +70,17 @@ spec:
           volumeMounts:
             - name: csi-socket-dir
               mountPath: /csi
+        # Liveness probe: https://kubernetes-csi.github.io/docs/livenessprobe.html
+        - name: liveness-probe
+          imagePullPolicy: IfNotPresent
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.16.0
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - --health-port=9808
+          volumeMounts:
+          - name: csi-socket-dir
+            mountPath: /csi
       volumes:
         - name: csi-socket-dir
           emptyDir: {}
