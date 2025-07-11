@@ -23,8 +23,8 @@ spec:
       containers:
         # Controller server container
         - name: opennebula-csi-plugin
-          image: ghcr.io/opennebula/opennebula-csi-plugin:latest #TODO: parameterize
-          imagePullPolicy: Always # TODO: parameterize
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -32,7 +32,7 @@ spec:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
             - name: ONE_XMLRPC
-              value: "http://localhost:2633/RPC2" # TODO: parameterize
+              value: "{{ .Values.oneApiEndpoint }}"
             - name: ONE_AUTH
               valueFrom:
                 secretKeyRef:

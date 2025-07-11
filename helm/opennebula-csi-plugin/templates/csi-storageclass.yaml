@@ -39,7 +39,7 @@ allowVolumeExpansion: false
 mountOptions: [] # TODO
 volumeBindingMode: Immediate
 parameters:
-  - fsType: "ext4"
+  fsType: "ext4"
 
 ---
 apiVersion: storage.k8s.io/v1
@@ -54,4 +54,4 @@ allowVolumeExpansion: false
 mountOptions: [] # TODO
 volumeBindingMode: Immediate
 parameters:
-  - fsType: "ext4"
+  fsType: "ext4"
