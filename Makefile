@@ -15,19 +15,17 @@ else
 GOBIN := $(shell go env GOBIN)
 endif
 
-GOLANGCI_LINT_VERSION	?= 2.2.1
-ENVSUBST_VERSION		?= 1.4.2
-KUBECTL_VERSION			?= 1.31.4
-KUSTOMIZE_VERSION		?= 5.6.0
-HELM_VERSION			?= 3.17.3
-TILT_VERSION      		?= 0.35.0
+GOLANGCI_LINT_VERSION		?= 2.2.1
+ENVSUBST_VERSION			?= 1.4.2
+KUBECTL_VERSION				?= 1.31.4
+KUSTOMIZE_VERSION			?= 5.6.0
+HELM_VERSION				?= 3.17.3
 
 GOLANGCI_LINT	:= $(SELF)/bin/golangci-lint
 ENVSUBST  		:= $(SELF)/bin/envsubst
 KUBECTL			:= $(SELF)/bin/kubectl
 KUSTOMIZE		:= $(SELF)/bin/kustomize
 HELM			:= $(SELF)/bin/helm
-TILT	  		:= $(SELF)/bin/tilt
 
 CLOSEST_TAG ?= $(shell git -C $(SELF) describe --tags --abbrev=0)
 
@@ -48,9 +46,10 @@ BUILD_BINS := opennebula-cloud-controller-manager opennebula-csi-plugin
 # List of container image names to build and push
 IMAGE_NAMES := cloud-provider-opennebula opennebula-csi-plugin
 
-
 -include .env
 export
+
+include Makefile.dev.mk
 
 .PHONY: all clean
 
@@ -147,7 +146,6 @@ manifests-opennebula-csi-plugin: $(HELM)
 	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
 		--set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
 		--set image.tag=$(CLOSEST_TAG) \
-		--set image.pullPolicy="IfNotPresent" \
 		--set oneApiEndpoint=$(ONE_XMLRPC) \
 		--set oneAuth=$(ONE_AUTH) \
 		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/release/opennebula-csi-plugin.yaml
@@ -156,15 +154,13 @@ manifests-opennebula-csi-plugin-dev: $(HELM)
 	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
 		--set image.repository=$(LOCAL_REGISTRY)/opennebula-csi-plugin \
 		--set image.tag=$(LOCAL_TAG) \
-		--set image.pullPolicy="Always" \
 		--set oneApiEndpoint=$(ONE_XMLRPC) \
 		--set oneAuth=$(ONE_AUTH) \
 		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/dev/opennebula-csi-plugin.yaml
 
-
 # Dependencies
 
-.PHONY: golangci-lint envsubst kubectl kustomize helm tilt
+.PHONY: golangci-lint envsubst kubectl kustomize helm
 
 golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT):
@@ -192,13 +188,6 @@ $(HELM):
 	| tar -xzO -f- linux-amd64/helm \
 	| install -m u=rwx,go= -o $(USER) -D /dev/fd/0 $@-v$(HELM_VERSION); }
 	@ln -sf $@-v$(HELM_VERSION) $@
-
-tilt: $(TILT)
-$(TILT):
-	@[ -f $@-v${TILT_VERSION} ] || \
-	{ curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz \
-	| tar -xzO tilt | install -m u=rwx,go= -o $(USER) -D /dev/fd/0 $@-v$(TILT_VERSION); }
-	@ln -sf $@-v${TILT_VERSION} $@
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
