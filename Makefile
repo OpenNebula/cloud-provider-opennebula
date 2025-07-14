@@ -132,7 +132,7 @@ undeploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Undeploy controller from the K8s
 
 helm-deploy-opennebula-csi-plugin: $(HELM) # Deploy OpenNebula CSI plugin using Helm to the cluster specified in ~/.kube/config.
 	$(HELM) upgrade --install opennebula-csi-plugin helm/opennebula-csi-plugin
-	    --set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
+		--set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
 		--set image.tag=$(CLOSEST_TAG) \
 		--set image.pullPolicy="IfNotPresent" \
 		--set oneApiEndpoint=$(ONE_XMLRPC) \
