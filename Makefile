@@ -6,6 +6,8 @@ PATH := $(SELF)/bin:$(PATH)
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+DEPLOY_DIR  := $(SELF)/_deploy
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN := $(shell go env GOPATH)/bin
@@ -13,13 +15,17 @@ else
 GOBIN := $(shell go env GOBIN)
 endif
 
-ENVSUBST_VERSION  ?= 1.4.2
-KUBECTL_VERSION   ?= 1.31.4
-KUSTOMIZE_VERSION ?= 5.6.0
+GOLANGCI_LINT_VERSION	?= 2.2.1
+ENVSUBST_VERSION		?= 1.4.2
+KUBECTL_VERSION			?= 1.31.4
+KUSTOMIZE_VERSION		?= 5.6.0
+HELM_VERSION			?= 3.17.3
 
-ENVSUBST  := $(SELF)/bin/envsubst
-KUBECTL   := $(SELF)/bin/kubectl
-KUSTOMIZE := $(SELF)/bin/kustomize
+GOLANGCI_LINT	:= $(SELF)/bin/golangci-lint
+ENVSUBST  		:= $(SELF)/bin/envsubst
+KUBECTL			:= $(SELF)/bin/kubectl
+KUSTOMIZE		:= $(SELF)/bin/kustomize
+HELM			:= $(SELF)/bin/helm
 
 CLOSEST_TAG ?= $(shell git -C $(SELF) describe --tags --abbrev=0)
 
@@ -50,10 +56,17 @@ all: build
 
 clean:
 	rm --preserve-root -rf '$(SELF)/bin/'
+	rm --preserve-root -rf '$(DEPLOY_DIR)'
 
 # Development
 
-.PHONY: fmt vet test
+.PHONY: lint lint-fix fmt vet test
+
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run
+
+lint-fix: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run --fix
 
 fmt:
 	go fmt ./...
@@ -112,9 +125,48 @@ deploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Deploy controller to the K8s clust
 undeploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
 
+
+# Helm
+
+.PHONY: helm-deploy-opennebula-csi-plugin helm-undeploy-opennebula-csi-plugin manifests-opennebula-csi-plugin manifests-opennebula-csi-plugin-dev
+
+helm-deploy-opennebula-csi-plugin: $(HELM) # Deploy OpenNebula CSI plugin using Helm to the cluster specified in ~/.kube/config.
+	$(HELM) upgrade --install opennebula-csi-plugin helm/opennebula-csi-plugin
+		--set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
+		--set image.tag=$(CLOSEST_TAG) \
+		--set image.pullPolicy="IfNotPresent" \
+		--set oneApiEndpoint=$(ONE_XMLRPC) \
+		--set oneAuth=$(ONE_AUTH)
+
+helm-undeploy-opennebula-csi-plugin: $(HELM) # Undeploy OpenNebula CSI plugin from the cluster specified in ~/.kube/config.
+	$(HELM) uninstall opennebula-csi-plugin
+
+manifests-opennebula-csi-plugin: $(HELM)
+	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
+		--set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
+		--set image.tag=$(CLOSEST_TAG) \
+		--set image.pullPolicy="IfNotPresent" \
+		--set oneApiEndpoint=$(ONE_XMLRPC) \
+		--set oneAuth=$(ONE_AUTH) \
+		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/release/opennebula-csi-plugin.yaml
+
+manifests-opennebula-csi-plugin-dev: $(HELM)
+	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
+		--set image.repository=$(LOCAL_REGISTRY)/opennebula-csi-plugin \
+		--set image.tag=$(LOCAL_TAG) \
+		--set image.pullPolicy="Always" \
+		--set oneApiEndpoint=$(ONE_XMLRPC) \
+		--set oneAuth=$(ONE_AUTH) \
+		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/dev/opennebula-csi-plugin.yaml
+
+
 # Dependencies
 
-.PHONY: envsubst kubectl kustomize
+.PHONY: golangci-lint envsubst kubectl kustomize helm
+
+golangci-lint: $(GOLANGCI_LINT)
+$(GOLANGCI_LINT):
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,v$(GOLANGCI_LINT_VERSION))
 
 envsubst: $(ENVSUBST)
 $(ENVSUBST):
@@ -130,6 +182,14 @@ $(KUBECTL):
 kustomize: $(KUSTOMIZE)
 $(KUSTOMIZE):
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,v$(KUSTOMIZE_VERSION))
+
+helm: $(HELM)
+$(HELM):
+	@[ -f $@-v$(HELM_VERSION) ] || \
+	{ curl -fsSL https://get.helm.sh/helm-v$(HELM_VERSION)-linux-amd64.tar.gz \
+	| tar -xzO -f- linux-amd64/helm \
+	| install -m u=rwx,go= -o $(USER) -D /dev/fd/0 $@-v$(HELM_VERSION); }
+	@ln -sf $@-v$(HELM_VERSION) $@
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
