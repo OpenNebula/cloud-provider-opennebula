@@ -15,11 +15,11 @@ else
 GOBIN := $(shell go env GOBIN)
 endif
 
-GOLANGCI_LINT_VERSION	?= 2.2.1
-ENVSUBST_VERSION		?= 1.4.2
-KUBECTL_VERSION			?= 1.31.4
-KUSTOMIZE_VERSION		?= 5.6.0
-HELM_VERSION			?= 3.17.3
+GOLANGCI_LINT_VERSION		?= 2.2.1
+ENVSUBST_VERSION			?= 1.4.2
+KUBECTL_VERSION				?= 1.31.4
+KUSTOMIZE_VERSION			?= 5.6.0
+HELM_VERSION				?= 3.17.3
 
 GOLANGCI_LINT	:= $(SELF)/bin/golangci-lint
 ENVSUBST  		:= $(SELF)/bin/envsubst
@@ -46,9 +46,10 @@ BUILD_BINS := opennebula-cloud-controller-manager opennebula-csi-plugin
 # List of container image names to build and push
 IMAGE_NAMES := cloud-provider-opennebula opennebula-csi-plugin
 
-
 -include .env
 export
+
+include Makefile.dev.mk
 
 .PHONY: all clean
 
@@ -145,7 +146,6 @@ manifests-opennebula-csi-plugin: $(HELM)
 	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
 		--set image.repository=$(REMOTE_REGISTRY)/opennebula-csi-plugin \
 		--set image.tag=$(CLOSEST_TAG) \
-		--set image.pullPolicy="IfNotPresent" \
 		--set oneApiEndpoint=$(ONE_XMLRPC) \
 		--set oneAuth=$(ONE_AUTH) \
 		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/release/opennebula-csi-plugin.yaml
@@ -154,11 +154,9 @@ manifests-opennebula-csi-plugin-dev: $(HELM)
 	$(HELM) template opennebula-csi-plugin helm/opennebula-csi-plugin \
 		--set image.repository=$(LOCAL_REGISTRY)/opennebula-csi-plugin \
 		--set image.tag=$(LOCAL_TAG) \
-		--set image.pullPolicy="Always" \
 		--set oneApiEndpoint=$(ONE_XMLRPC) \
 		--set oneAuth=$(ONE_AUTH) \
 		| install -m u=rw,go=r -D /dev/fd/0 $(DEPLOY_DIR)/dev/opennebula-csi-plugin.yaml
-
 
 # Dependencies
 
