@@ -16,6 +16,98 @@ CTLPTL         	:= $(SELF)/bin/ctlptl
 CLUSTERCTL     	:= $(SELF)/bin/clusterctl
 KUBECTL			:= $(SELF)/bin/kubectl
 
+define CLUSTER_NODES_USERDATA
+install -m u=rw,go=r -D /dev/fd/0 /etc/containerd/certs.d/$(LOCAL_REGISTRY)/hosts.toml <<EOF
+[host."http://$(LOCAL_REGISTRY)"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true
+EOF
+systemctl restart containerd
+endef
+
+define CLUSTER_NODES_USERDATA_BASE64
+$(file > /tmp/userdata.tmp,$(CLUSTER_NODES_USERDATA))$(shell base64 -w 0 /tmp/userdata.tmp && rm -f /tmp/userdata.tmp)
+endef
+
+define HELM_VALUES
+CLUSTER_TEMPLATES:
+  - templateName: "$(WORKLOAD_CLUSTER_NAME)-router"
+    templateContent: |
+      CONTEXT = [
+        NETWORK = "YES",
+        ONEAPP_VNF_DNS_ENABLED = "YES",
+        ONEAPP_VNF_DNS_NAMESERVERS = "1.1.1.1,8.8.8.8",
+        ONEAPP_VNF_DNS_USE_ROOTSERVERS = "NO",
+        ONEAPP_VNF_NAT4_ENABLED = "YES",
+        ONEAPP_VNF_NAT4_INTERFACES_OUT = "eth0",
+        ONEAPP_VNF_ROUTER4_ENABLED = "YES",
+        SSH_PUBLIC_KEY = "$$USER[SSH_PUBLIC_KEY]",
+        TOKEN = "YES" ]
+      CPU = "1"
+      DISK = [
+        IMAGE = "$(WORKLOAD_CLUSTER_NAME)-router" ]
+      GRAPHICS = [
+        LISTEN = "0.0.0.0",
+        TYPE = "vnc" ]
+      LXD_SECURITY_PRIVILEGED = "true"
+      MEMORY = "512"
+      NIC_DEFAULT = [
+        MODEL = "virtio" ]
+      OS = [
+        ARCH = "x86_64",
+        FIRMWARE_SECURE = "YES" ]
+      VROUTER = "YES"
+  - templateName: "$(WORKLOAD_CLUSTER_NAME)-master"
+    templateContent: |
+      CONTEXT = [
+        START_SCRIPT_BASE64 = "$(CLUSTER_NODES_USERDATA_BASE64)",
+        BACKEND = "YES",
+        NETWORK = "YES",
+        GROW_FS = "/",
+        SET_HOSTNAME = "$$NAME",
+        SSH_PUBLIC_KEY = "$$USER[SSH_PUBLIC_KEY]",
+        TOKEN = "YES" ]
+      CPU = "1"
+      DISK = [
+        IMAGE = "$(WORKLOAD_CLUSTER_NAME)-node",
+        SIZE = "16384" ]
+      GRAPHICS = [
+        LISTEN = "0.0.0.0",
+        TYPE = "vnc" ]
+      HYPERVISOR = "kvm"
+      LXD_SECURITY_PRIVILEGED = "true"
+      MEMORY = "3072"
+      OS = [
+        ARCH = "x86_64",
+        FIRMWARE_SECURE = "YES" ]
+      SCHED_REQUIREMENTS = "HYPERVISOR=kvm"
+      VCPU = "2"
+  - templateName: "$(WORKLOAD_CLUSTER_NAME)-worker"
+    templateContent: |
+      CONTEXT = [
+        START_SCRIPT_BASE64 = "$(CLUSTER_NODES_USERDATA_BASE64)",
+        BACKEND = "YES",
+        NETWORK = "YES",
+        GROW_FS = "/",
+        SET_HOSTNAME = "$$NAME",
+        SSH_PUBLIC_KEY = "$$USER[SSH_PUBLIC_KEY]",
+        TOKEN = "YES" ]
+      CPU = "1"
+      DISK = [
+        IMAGE = "$(WORKLOAD_CLUSTER_NAME)-node",
+        SIZE = "16384" ]
+      GRAPHICS = [
+        LISTEN = "0.0.0.0",
+        TYPE = "vnc" ]
+      HYPERVISOR = "kvm"
+      LXD_SECURITY_PRIVILEGED = "true"
+      MEMORY = "3072"
+      OS = [
+        ARCH = "x86_64",
+        FIRMWARE_SECURE = "YES" ]
+      SCHED_REQUIREMENTS = "HYPERVISOR=kvm"
+      VCPU = "2"
+endef
 
 define CTLPTL_CLUSTER_YAML
 ---
@@ -33,8 +125,8 @@ kindV1Alpha4Cluster:
   nodes:
   - role: control-plane
     extraMounts:
-    - hostPath: /var/run/docker.sock
-      containerPath: /var/run/docker.sock
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
 endef
 
 WORKLOAD_CLUSTER_NAME ?= capone-workload
@@ -54,13 +146,22 @@ mgmt-cluster-destroy: $(CTLPTL)
 
 workload-cluster-deploy: workload-cluster-init workload-cluster-flannel
 
+test-script:
+	@echo "Running test script..."
+	@echo "$$HELM_VALUES" > /tmp/cluster_templates_values.yaml
+	cat /tmp/cluster_templates_values.yaml
+	rm --preserve-root -f /tmp/cluster_templates_values.yaml
+
 workload-cluster-init: $(HELM)
 	@if ! $(HELM) repo list -o json | jq -e '.[] | select(.name=="capone")' > /dev/null; then \
 		$(HELM) repo add capone https://opennebula.github.io/cluster-api-provider-opennebula/charts/ && $(HELM) repo update; \
 	fi
-	@$(HELM) upgrade --install $(WORKLOAD_CLUSTER_NAME) capone/capone-kadm --version $(CAPONE_VERSION) \
+	@echo "$$HELM_VALUES" > /tmp/cluster_templates_values.yaml
+	$(HELM) upgrade --install $(WORKLOAD_CLUSTER_NAME) capone/capone-kadm --version $(CAPONE_VERSION) \
 		--set ONE_XMLRPC=$(ONE_XMLRPC) \
-		--set ONE_AUTH=$(ONE_AUTH)
+		--set ONE_AUTH=$(ONE_AUTH) \
+		--values /tmp/cluster_templates_values.yaml
+	@rm -f --preserve-root /tmp/cluster_templates_values.yaml
 
 workload-cluster-flannel: $(CLUSTERCTL) $(KUBECTL)
 	@for i in {1..60}; do \
@@ -82,11 +183,11 @@ workload-cluster-destroy: $(HELM)
 tilt-up: $(TILT) $(KUBECTL) workload-cluster-kubeconfig
 	export KUBECONFIG=$(WORKLOAD_CLUSTER_KUBECONFIG) && $(TILT) up --file $(SELF)/tilt/Tiltfile
 
-tilt-stop: $(TILT)
-	$(TILT) down
+tilt-down: $(TILT)
+	$(TILT) down --file $(SELF)/tilt/Tiltfile
 
 tilt-clean: $(TILT)
-	rm --preserve-root -rf tilt/build
+	rm --preserve-root -rf $(SELF)/tilt/build
 
 # Dependencies
 
