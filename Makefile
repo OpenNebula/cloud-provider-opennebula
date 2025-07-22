@@ -55,7 +55,7 @@ include Makefile.dev.mk
 
 all: build
 
-clean:
+clean: tilt-clean
 	rm --preserve-root -rf '$(SELF)/bin/'
 	rm --preserve-root -rf '$(DEPLOY_DIR)'
 
