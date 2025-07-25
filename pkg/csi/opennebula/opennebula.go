@@ -36,7 +36,7 @@ type OpenNebulaProvider struct {
 }
 
 type OpenNebulaVolumeProvider interface {
-	CreateVolume(ctx context.Context, name string, size int64, owner string) error
+	CreateVolume(ctx context.Context, name string, size int64, owner string, params map[string]string) error
 	DeleteVolume(ctx context.Context, volume string) error
 	AttachVolume(ctx context.Context, volume string, node string, params map[string]string) error
 	DetachVolume(ctx context.Context, volume string, node string) error

@@ -441,8 +441,8 @@ type MockOpenNebulaVolumeProviderTestify struct {
 	mock.Mock
 }
 
-func (m *MockOpenNebulaVolumeProviderTestify) CreateVolume(ctx context.Context, name string, size int64, owner string) error {
-	args := m.Called(ctx, name, size, owner)
+func (m *MockOpenNebulaVolumeProviderTestify) CreateVolume(ctx context.Context, name string, size int64, owner string, params map[string]string) error {
+	args := m.Called(ctx, name, size, owner, params)
 	return args.Error(0)
 }
 

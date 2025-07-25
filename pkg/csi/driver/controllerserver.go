@@ -87,9 +87,11 @@ func (s *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolu
 		}
 	}
 
+	params := req.GetParameters()
+
 	klog.V(3).InfoS("Creating new volume", "volumeName", req.Name, "requiredBytes", requiredBytes)
 
-	err := s.volumeProvider.CreateVolume(ctx, req.Name, requiredBytes, DefaultDriverName)
+	err := s.volumeProvider.CreateVolume(ctx, req.Name, requiredBytes, DefaultDriverName, params)
 	if err != nil {
 		klog.V(0).ErrorS(err, "Failed to create volume",
 			"method", "CreateVolume", "volumeName", req.Name, "requiredBytes", requiredBytes, "defaultDriverName", DefaultDriverName)

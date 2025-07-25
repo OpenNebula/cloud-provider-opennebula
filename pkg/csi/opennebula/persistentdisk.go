@@ -50,7 +50,7 @@ func NewPersistentDiskVolumeProvider(client *OpenNebulaClient) (*PersistentDiskV
 	}, nil
 }
 
-func (p *PersistentDiskVolumeProvider) CreateVolume(ctx context.Context, name string, size int64, owner string) error {
+func (p *PersistentDiskVolumeProvider) CreateVolume(ctx context.Context, name string, size int64, owner string, params map[string]string) error {
 	if name == "" {
 		return fmt.Errorf("volume name cannot be empty")
 	}
@@ -71,6 +71,10 @@ func (p *PersistentDiskVolumeProvider) CreateVolume(ctx context.Context, name st
 	tpl.Add(imk.Persistent, "YES")
 	tpl.AddPair(ownerTag, owner)
 	tpl.Add(imk.Type, string(image.Datablock))
+
+	if params != nil && params["devPrefix"] != "" {
+		tpl.Add(imk.DevPrefix, params["devPrefix"])
+	}
 
 	imageID, err := p.ctrl.Images().Create(tpl.String(), 1)
 	if err != nil {
