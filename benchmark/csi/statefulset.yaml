@@ -1,0 +1,61 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fio-benchmark
+spec:
+  serviceName: fio-benchmark
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fio-benchmark
+  template:
+    metadata:
+      labels:
+        app: fio-benchmark
+    spec:
+      containers:
+      - name: fio
+        image: $LOCAL_REGISTRY/fio-benchmark:dev # Replace LOCAL_REGISTRY with envsubst
+        command: ["fio"]
+        args: ["/fio/benchmark.job", "--eta=never", "--directory=/benchmark-data/"]
+        volumeMounts:
+        - name: fio-jobfile
+          mountPath: /fio
+        - name: data
+          mountPath: /benchmark-data
+      volumes:
+      - name: fio-jobfile
+        configMap:
+          name: fio-jobfile
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      storageClassName: opennebula-fs
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 40G
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: fio-jobfile
+data:
+  benchmark.job: |-
+    [global]
+    ioengine=psync
+    direct=1
+    buffered=0
+    size=1G
+    iodepth=64
+    numjobs=20
+    group_reporting
+    refill_buffers
+    randrepeat=0
+    percentage_random=0
+    bs=256k
+    rw=randrw
+    [non-buffered_rw]
