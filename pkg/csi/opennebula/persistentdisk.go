@@ -108,7 +108,7 @@ func (p *PersistentDiskVolumeProvider) DeleteVolume(ctx context.Context, volume 
 	return nil
 }
 
-func (p *PersistentDiskVolumeProvider) AttachVolume(ctx context.Context, volume, node string) error {
+func (p *PersistentDiskVolumeProvider) AttachVolume(ctx context.Context, volume string, node string, params map[string]string) error {
 	nodeID, err := p.NodeExists(ctx, node)
 	if err != nil || nodeID == -1 {
 		return fmt.Errorf("failed to check if node exists: %w", err)
@@ -120,6 +120,7 @@ func (p *PersistentDiskVolumeProvider) AttachVolume(ctx context.Context, volume,
 	}
 	disk := shared.NewDisk()
 	disk.Add(shared.ImageID, volumeID)
+	addDiskParams(disk, params)
 
 	err = p.ctrl.VM(nodeID).DiskAttach(disk.String())
 	if err != nil {
@@ -131,6 +132,66 @@ func (p *PersistentDiskVolumeProvider) AttachVolume(ctx context.Context, volume,
 		return fmt.Errorf("failed to wait for node readiness: %w", err)
 	}
 	return nil
+}
+
+func addDiskParams(disk *shared.Disk, params map[string]string) {
+	for key, val := range params {
+		if val == "" {
+			continue
+		}
+		switch key {
+		case "devPrefix":
+			disk.Add(shared.DevPrefix, val)
+		case "cache":
+			disk.Add(shared.Cache, val)
+		case "driver":
+			disk.Add(shared.Driver, val)
+		case "io":
+			disk.Add(shared.IO, val)
+		case "ioThread":
+			disk.Add(shared.IOThread, val)
+		case "virtioBLKQueues":
+			disk.Add(shared.VirtioBLKQueues, val)
+		case "totalBytesSec":
+			disk.Add(shared.TotalBytesSec, val)
+		case "readBytesSec":
+			disk.Add(shared.ReadBytesSec, val)
+		case "writeBytesSec":
+			disk.Add(shared.WriteBytesSec, val)
+		case "totalIOPSSec":
+			disk.Add(shared.TotalIOPSSec, val)
+		case "readIOPSSec":
+			disk.Add(shared.ReadIOPSSec, val)
+		case "writeIOPSSec":
+			disk.Add(shared.WriteIOPSSec, val)
+		case "totalBytesSecMax":
+			disk.Add(shared.TotalBytesSecMax, val)
+		case "readBytesSecMax":
+			disk.Add(shared.ReadBytesSecMax, val)
+		case "writeBytesSecMax":
+			disk.Add(shared.WriteBytesSecMax, val)
+		case "totalIOPSSecMax":
+			disk.Add(shared.TotalIOPSSecMax, val)
+		case "readIOPSSecMax":
+			disk.Add(shared.ReadIOPSSecMax, val)
+		case "writeIOPSSecMax":
+			disk.Add(shared.WriteIOPSSecMax, val)
+		case "totalBytesSecMaxLength":
+			disk.Add(shared.TotalBytesSecMaxLength, val)
+		case "readBytesSecMaxLength":
+			disk.Add(shared.ReadBytesSecMaxLength, val)
+		case "writeBytesSecMaxLength":
+			disk.Add(shared.WriteBytesSecMaxLength, val)
+		case "totalIOPSSecMaxLength":
+			disk.Add(shared.TotalIOPSSecMaxLength, val)
+		case "readIOPSSecMaxLength":
+			disk.Add(shared.ReadIOPSSecMaxLength, val)
+		case "writeIOPSSecMaxLength":
+			disk.Add(shared.WriteIOPSSecMaxLength, val)
+		case "sizeIOPSSec":
+			disk.Add(shared.SizeIOPSSec, val)
+		}
+	}
 }
 
 func (p *PersistentDiskVolumeProvider) DetachVolume(ctx context.Context, volume, node string) error {
