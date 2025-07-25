@@ -77,6 +77,7 @@ func (s *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolu
 				Volume: &csi.Volume{
 					VolumeId:      req.Name,
 					CapacityBytes: requiredBytes,
+					VolumeContext: req.GetParameters(), //pass request parameters as volume context
 				},
 			}, nil
 		} else {
