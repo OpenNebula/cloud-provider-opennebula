@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -243,6 +244,13 @@ func (ns *NodeServer) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 		return nil, status.Error(codes.InvalidArgument, "volume capability is required")
 	}
 
+	volumeContext := req.GetPublishContext()
+	volName := volumeContext["volumeName"]
+	if len(volName) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "[volumeName] entry is required in volume context")
+	}
+	devicePath := ns.getDeviceName(volName)
+
 	//TODO: Check if the volume with volumeID exists
 	// If not, return 5 NOT_FOUND error
 
@@ -250,14 +258,20 @@ func (ns *NodeServer) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 		"method", "NodePublishVolume", "volumeID", volumeID, "stagingTargetPath", stagingTargetPath,
 		"targetPath", targetPath)
 
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+	targetDir := targetPath
+	accessType := volumeCapability.GetAccessType()
+	if _, ok := accessType.(*csi.VolumeCapability_Block); ok {
+		targetDir = filepath.Dir(targetPath)
+	}
+
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
 		//TODO: Review permissions
-		if err := os.MkdirAll(targetPath, 0750); err != nil {
+		if err := os.MkdirAll(targetDir, 0750); err != nil {
 			klog.V(0).ErrorS(err, "Failed to create target path",
 				"method", "NodePublishVolume", "volumeID", volumeID, "stagingTargetPath", stagingTargetPath,
-				"targetPath", targetPath)
+				"targetPath", targetDir)
 			return nil, status.Errorf(codes.Internal,
-				"failed to create target path %s: %v", targetPath, err)
+				"failed to create target path %s: %v", targetDir, err)
 		}
 	}
 
@@ -268,10 +282,9 @@ func (ns *NodeServer) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 
 	var err error
 	var resp *csi.NodePublishVolumeResponse
-	accessType := volumeCapability.GetAccessType()
 	switch accessType.(type) {
 	case *csi.VolumeCapability_Block:
-		resp, err = ns.handleBlockVolumePublish(stagingTargetPath, targetPath, volumeCapability, options)
+		resp, err = ns.handleBlockVolumePublish(stagingTargetPath, targetPath, devicePath, volumeCapability)
 	case *csi.VolumeCapability_Mount:
 		resp, err = ns.handleMountVolumePublish(stagingTargetPath, targetPath, volumeCapability, options)
 	default:
@@ -293,34 +306,40 @@ func (ns *NodeServer) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 	return resp, nil
 }
 
-func (ns NodeServer) handleBlockVolumePublish(stagingPath, targetPath string, volumeCapability *csi.VolumeCapability, options []string) (*csi.NodePublishVolumeResponse, error) {
-
-	checkMountPoint, err := ns.checkMountPoint(stagingPath, targetPath, volumeCapability)
+func (ns NodeServer) handleBlockVolumePublish(stagingPath, targetPath, devicePath string, volumeCapability *csi.VolumeCapability) (*csi.NodePublishVolumeResponse, error) {
+	_, err := ns.checkMountPoint(stagingPath, targetPath, volumeCapability)
 	if err != nil {
 		klog.V(0).ErrorS(err, "Failed to check mount point",
 			"method", "handleBlockVolumePublish", "stagingPath", stagingPath, "targetPath", targetPath)
 		return nil, fmt.Errorf("failed to check mount point: %w", err)
 	}
 
-	//volume is already mounted at targetPath
-	if checkMountPoint.targetIsMountPoint && checkMountPoint.deviceIsMounted {
-		return &csi.NodePublishVolumeResponse{}, nil
+	if fi, err := os.Lstat(targetPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			existing, err := os.Readlink(targetPath)
+			if err == nil && existing == devicePath {
+				klog.V(3).InfoS("Device already linked to target path", "targetPath", targetPath)
+				return &csi.NodePublishVolumeResponse{}, nil
+			}
+		}
+		klog.V(0).ErrorS(err, "Failed to read symlink at target path",
+			"method", "handleBlockVolumePublish", "targetPath", targetPath, "devicePath", devicePath)
+		return nil, status.Error(codes.Internal,
+			"target path already exists but is not a symlink to the device path")
 	}
 
-	klog.V(3).InfoS("Mounting block volume at target path",
-		"method", "handleBlockVolumePublish", "stagingPath", stagingPath, "targetPath", targetPath)
+	klog.V(3).InfoS("Linking block volume device to target path",
+		"method", "handleBlockVolumePublish", "stagingPath", stagingPath, "targetPath", targetPath,
+		"devicePath", devicePath)
 
-	// mount the device at the target path
-	fsType := "" // Block volumes do not require a filesystem type
-	err = ns.mounter.Mount(stagingPath, targetPath, fsType, options)
-	if err != nil {
-		klog.V(0).ErrorS(err, "Failed to mount device at target path",
-			"method", "handleBlockVolumePublish", "stagingPath", stagingPath, "targetPath", targetPath)
+	if err := os.Symlink(devicePath, targetPath); err != nil {
+		klog.V(0).ErrorS(err, "Failed to create symlink",
+			"targetPath", targetPath, "devicePath", devicePath)
 		return nil, fmt.Errorf("failed to mount device at target path: %w", err)
 	}
 
-	klog.V(3).InfoS("Block volume successfully mounted at target path",
-		"method", "handleBlockVolumePublish", "stagingPath", stagingPath, "targetPath", targetPath)
+	klog.V(1).InfoS("Block volume successfully linked to target path",
+		"method", "handleBlockVolumePublish", "devicePath", devicePath, "targetPath", targetPath)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -389,11 +408,29 @@ func (ns *NodeServer) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpubl
 	klog.V(3).InfoS("Unpublishing volume",
 		"volumeID", volumeID, "targetPath", targetPath)
 
-	err := mount.CleanupMountPoint(targetPath, ns.mounter, true)
+	fi, err := os.Lstat(targetPath)
 	if err != nil {
-		klog.V(0).ErrorS(err, "Failed to unmount volume at target path",
-			"method", "NodeUnpublishVolume", "volumeID", volumeID, "targetPath", targetPath)
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to unmount volume at target path %s: %v", targetPath, err))
+		if os.IsNotExist(err) {
+			klog.V(3).InfoS("Target path does not exist, already unpublished", "targetPath", targetPath)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+		klog.V(0).ErrorS(err, "Failed to stat target path", "targetPath", targetPath)
+		return nil, status.Errorf(codes.Internal, "failed to stat target path %q: %v", targetPath, err)
+	}
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if err = os.Remove(targetPath); err != nil {
+			klog.V(0).ErrorS(err, "Failed to remove symlink",
+				"method", "NodeUnpublishVolume", "volumeID", volumeID, "targetPath", targetPath)
+			return nil, status.Errorf(codes.Internal, "failed to remove symlink %q: %v", targetPath, err)
+		}
+	} else {
+		if err = mount.CleanupMountPoint(targetPath, ns.mounter, true); err != nil {
+			klog.V(0).ErrorS(err, "Failed to unmount volume at target path",
+				"method", "NodeUnpublishVolume", "volumeID", volumeID, "targetPath", targetPath)
+			return nil, status.Error(codes.Internal, fmt.Sprintf(
+				"failed to unmount volume at target path %s: %v", targetPath, err))
+		}
 	}
 
 	klog.V(1).InfoS("Volume successfully unpublished from target path",
