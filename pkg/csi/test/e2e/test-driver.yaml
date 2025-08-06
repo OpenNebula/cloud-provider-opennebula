@@ -13,3 +13,8 @@ DriverInfo:
     pvcDataSource: false
     snapshotDataSource: false
     rwx: false
+  SupportedFsType:
+    ext4: {}
+    ext3: {}
+    ext2: {}
+    xfs: {}

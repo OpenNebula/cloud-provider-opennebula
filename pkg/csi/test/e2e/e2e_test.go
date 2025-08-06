@@ -24,8 +24,9 @@ import (
 )
 
 var _ = Describe("CSI Driver", func() {
-	It("runs external e2e test binary", func() {
-		cmd := exec.Command(
+	It("runs external e2e test binary", func(ctx SpecContext) {
+		cmd := exec.CommandContext(
+			ctx,
 			"./e2e.test",
 			"-ginkgo.v",
 			"-ginkgo.focus=External.Storage",

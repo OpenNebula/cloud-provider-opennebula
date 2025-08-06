@@ -46,8 +46,14 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/scheme"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -61,15 +67,17 @@ const (
 	kindClusterName          = "mgmt-csi-e2e-cluster"
 	workloadClusterName      = "wkld-csi-e2e-cluster"
 	workloadClusterNamespace = "default"
-	capiProvider             = "rke2"
+	capiProvider             = "kadm"
 	caponeChartName          = "capone"
 	caponeChartUrl           = "https://opennebula.github.io/cluster-api-provider-opennebula/charts"
+	flannelUrl               = "https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
 	workloadMachineCount     = 2
 	localRegistryPort        = "5005"
 	localRegistryName        = "local-registry"
 	kubernetesVersion        = "v1.31.4"
 	driverName               = "opennebula-csi-plugin"
 	driverImageTag           = "e2e"
+	publicNetworkName        = "service"
 )
 
 var (
@@ -134,9 +142,6 @@ func init() {
 }
 
 var _ = SynchronizedBeforeSuite(func() {
-	// Todo Review gingko timeout
-	//SetDefaultEventuallyTimeout(2 * time.Hour)
-
 	// Download e2e binary
 	Expect(getE2Ebinary()).ToNot(HaveOccurred(), "Failed to download e2e binary")
 
@@ -173,8 +178,6 @@ var _ = SynchronizedBeforeSuite(func() {
 	initOptions := clusterctlclient.InitOptions{
 		Kubeconfig:              clusterctlclient.Kubeconfig{Path: managementClusterKubeconfigPath},
 		InfrastructureProviders: []string{infraestructureProvider},
-		BootstrapProviders:      []string{capiProvider},
-		ControlPlaneProviders:   []string{capiProvider},
 		WaitProviders:           true,
 	}
 
@@ -192,6 +195,8 @@ var _ = SynchronizedBeforeSuite(func() {
 		"ONE_XMLRPC":           oneXMLRPC,
 		"ONE_AUTH":             oneAuth,
 		"WORKER_MACHINE_COUNT": workloadMachineCount,
+		// E2E tests connect to nodes using the private network
+		"PRIVATE_NETWORK_NAME": publicNetworkName,
 	}
 
 	err = installChart(workloadClusterName,
@@ -272,7 +277,7 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 		PruneChildren: true,
 	}
 	_, err = cli.ImageRemove(context.Background(),
-		fmt.Sprintf("%s:%s/%s", localRegistry, localRegistryPort, driverName), imageRemoveOptions)
+		fmt.Sprintf("%s:%s/%s:%s", localRegistry, localRegistryPort, driverName, driverImageTag), imageRemoveOptions)
 	Expect(err).ToNot(HaveOccurred(), "Failed to remove e2e image")
 
 })
@@ -401,14 +406,6 @@ func checkWorkloadClusterReady(kubeconfigPath string, client clusterctlclient.Cl
 		return false, "", fmt.Errorf("expected %d nodes, got %d", workloadMachineCount+1, len(nodes.Items))
 	}
 
-	for _, node := range nodes.Items {
-		for _, condition := range node.Status.Conditions {
-			if condition.Type == "Ready" && condition.Status != "True" {
-				return false, "", fmt.Errorf("node %s is not ready", node.Name)
-			}
-		}
-	}
-
 	kubeconfigFilePath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-kubeconfig.yaml", workloadClusterName))
 	ginkgo.DeferCleanup(func() {
 		os.Remove(kubeconfigFilePath)
@@ -417,6 +414,19 @@ func checkWorkloadClusterReady(kubeconfigPath string, client clusterctlclient.Cl
 	err = os.WriteFile(kubeconfigFilePath, []byte(workloadKubeconfig), 0600)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to save kubeconfig to file: %w", err)
+	}
+
+	err = applyManifestFromURL(kubeconfigFilePath, flannelUrl)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to apply flannel manifest: %w", err)
+	}
+
+	for _, node := range nodes.Items {
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == "Ready" && condition.Status != "True" {
+				return false, "", fmt.Errorf("node %s is not ready", node.Name)
+			}
+		}
 	}
 
 	return true, kubeconfigFilePath, nil
@@ -528,17 +538,12 @@ func buildPushCSIDriverImage(imageName, contextDir, dockerfilePath string) error
 func generateBase64RegistryConfig() string {
 	registry := fmt.Sprintf("%s:%s", localRegistry, localRegistryPort)
 
-	template := `install -m u=rw,go=r -D /dev/fd/0 /etc/rancher/rke2/registries.yaml <<EOF
-mirrors:
-  "%s":
-    endpoint:
-      - "http://%s"
-configs:
-  "%s":
-    tls:
-      insecure_skip_verify: true
+	template := `install -m u=rw,go=r -D /dev/fd/0 /etc/containerd/certs.d/%s/hosts.toml <<EOF
+[host."http://%s"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true
 EOF
-for svc in rke2-server rke2-agent; do systemctl is-active --quiet $svc && sudo systemctl restart $svc && break; done
+systemctl restart containerd
 `
 	content := fmt.Sprintf(template, registry, registry, registry)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
@@ -547,6 +552,7 @@ for svc in rke2-server rke2-agent; do systemctl is-active --quiet $svc && sudo s
 
 func applyBase64Code(base64config string) string {
 	template := `CONTEXT = [
+USERNAME = "$UNAME",
 BACKEND = "YES",
 NETWORK = "YES",
 GROW_FS = "/",
@@ -647,6 +653,73 @@ func getE2Ebinary() error {
 			return nil
 		}
 	}
+	return nil
+}
+
+func applyManifestFromURL(kubeconfig, url string) error {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return fmt.Errorf("failed to build config from kubeconfig: %w", err)
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download manifest: %w", err)
+	}
+	defer resp.Body.Close()
+
+	dc, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create discovery client: %w", err)
+	}
+
+	gr, err := restmapper.GetAPIGroupResources(dc)
+	if err != nil {
+		return fmt.Errorf("failed to get API group resources: %w", err)
+	}
+
+	mapper := restmapper.NewDiscoveryRESTMapper(gr)
+
+	dynClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	decoder := yaml.NewYAMLOrJSONDecoder(resp.Body, 4096)
+
+	for {
+		var obj unstructured.Unstructured
+		if err := decoder.Decode(&obj); err != nil {
+			break
+		}
+
+		gvk := obj.GroupVersionKind()
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			continue
+		}
+
+		var dr dynamic.ResourceInterface
+		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+			ns := obj.GetNamespace()
+			if ns == "" {
+				ns = "default"
+			}
+			dr = dynClient.Resource(mapping.Resource).Namespace(ns)
+		} else {
+			dr = dynClient.Resource(mapping.Resource)
+		}
+
+		_, err = dr.Create(context.TODO(), &obj, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			_, err = dr.Update(context.TODO(), &obj, metav1.UpdateOptions{})
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to apply manifest: %w", err)
+		}
+	}
+
 	return nil
 }
 
