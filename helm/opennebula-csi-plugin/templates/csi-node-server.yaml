@@ -60,10 +60,7 @@ spec:
             - name: csi-socket-dir
               mountPath: /csi
             - name: pods-mount-dir
-              mountPath: /var/lib/kubelet/pods
-              mountPropagation: "Bidirectional"
-            - name: kubelet-plugin-dir
-              mountPath: /var/lib/kubelet/plugins
+              mountPath: /var/lib/kubelet
               mountPropagation: "Bidirectional"
             - name: device-dir
               mountPath: /dev
@@ -106,11 +103,7 @@ spec:
             type: DirectoryOrCreate
         - name: pods-mount-dir
           hostPath:
-            path: /var/lib/kubelet/pods
-            type: Directory
-        - name: kubelet-plugin-dir
-          hostPath:
-            path: /var/lib/kubelet/plugins
+            path: /var/lib/kubelet
             type: Directory
         - name: device-dir
           hostPath:
