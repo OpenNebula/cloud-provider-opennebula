@@ -29,6 +29,8 @@ var _ = Describe("CSI Driver", func() {
 			ctx,
 			"./e2e.test",
 			"-ginkgo.v",
+			"-ginkgo.timeout=3h",
+			"-ginkgo.json-report=reportE2E.json",
 			"-ginkgo.focus=External.Storage",
 			"-storage.testdriver=test-driver.yaml",
 			"-kubeconfig=/tmp/wkld-csi-e2e-cluster-kubeconfig.yaml",
