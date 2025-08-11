@@ -46,6 +46,7 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -78,6 +79,7 @@ const (
 	driverName               = "opennebula-csi-plugin"
 	driverImageTag           = "e2e"
 	publicNetworkName        = "service"
+	registryImage            = "registry:2"
 )
 
 var (
@@ -249,6 +251,33 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 
 	err = deleteClient.Delete(ctx, cluster)
 	Expect(err).ToNot(HaveOccurred(), "Failed to delete workload cluster")
+
+	// Wait for the workload cluster to be deleted
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	ctxWorkload, cancel := context.WithTimeout(ctx, workloadTimeout)
+	defer cancel()
+
+	deleted := false
+	for !deleted {
+		select {
+		case <-ticker.C:
+			err = deleteClient.Get(ctx, ctrlclient.ObjectKey{
+				Name:      workloadClusterName,
+				Namespace: workloadClusterNamespace,
+			}, cluster)
+			if apierrors.IsNotFound(err) {
+				log.Println("Workload cluster deleted successfully")
+				deleted = true
+			} else if err != nil {
+				log.Printf("Error checking workload cluster deletion: %v", err)
+			}
+		case <-ctxWorkload.Done():
+			log.Println("Context cancelled while waiting for workload cluster deletion")
+			Expect(ctxWorkload.Err()).ToNot(HaveOccurred(), "Context cancelled while waiting for workload cluster deletion")
+		}
+	}
 
 	// Delete registry
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -451,9 +480,16 @@ func createLocalRegistry() error {
 		}
 	}
 
+	out, err := cli.ImagePull(ctx, registryImage, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", registryImage, err)
+	}
+	defer out.Close()
+	io.Copy(io.Discard, out)
+
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
-			Image: "registry:2",
+			Image: registryImage,
 			ExposedPorts: nat.PortSet{
 				"5000/tcp": struct{}{},
 			},
