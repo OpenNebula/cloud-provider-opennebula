@@ -6,6 +6,8 @@ PATH := $(SELF)/bin:$(PATH)
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+CHARTS_DIR := $(SELF)/_charts
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN := $(shell go env GOPATH)/bin
@@ -14,10 +16,12 @@ GOBIN := $(shell go env GOBIN)
 endif
 
 ENVSUBST_VERSION  ?= 1.4.2
+HELM_VERSION      ?= 3.17.3
 KUBECTL_VERSION   ?= 1.31.4
 KUSTOMIZE_VERSION ?= 5.6.0
 
 ENVSUBST  := $(SELF)/bin/envsubst
+HELM      := $(SELF)/bin/helm
 KUBECTL   := $(SELF)/bin/kubectl
 KUSTOMIZE := $(SELF)/bin/kustomize
 
@@ -84,27 +88,66 @@ docker-release:
 	$(CONTAINER_TOOL) buildx build --push --platform=$(_PLATFORMS) -t $(IMG_URL):$(CLOSEST_TAG) -t $(IMG_URL):latest -f Dockerfile .
 	-$(CONTAINER_TOOL) buildx rm cloud-provider-opennebula-builder
 
+# Helm
+
+.PHONY: charts
+
+define chart-generator-tool
+charts: $(CHARTS_DIR)/$(CLOSEST_TAG)/$(1)-$(subst v,,$(CLOSEST_TAG)).tgz
+
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1)-$(subst v,,$(CLOSEST_TAG)).tgz: $(CHARTS_DIR)/$(CLOSEST_TAG)/$(1) $(HELM)
+	$(HELM) package -d $(CHARTS_DIR)/$(CLOSEST_TAG) $(CHARTS_DIR)/$(CLOSEST_TAG)/$(1)
+
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):              CCM_IMG := {{ tpl .Values.CCM_IMG . }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):              CCM_CTL := {{ .Values.CCM_CTL }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):         CLUSTER_NAME := {{ .Values.CLUSTER_NAME }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):        NODE_SELECTOR := {{ (toYaml .Values.nodeSelector) | nindent 8 }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):             ONE_AUTH := {{ .Values.ONE_AUTH }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):           ONE_XMLRPC := {{ .Values.ONE_XMLRPC }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1): PRIVATE_NETWORK_NAME := {{ .Values.PRIVATE_NETWORK_NAME }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1):  PUBLIC_NETWORK_NAME := {{ .Values.PUBLIC_NETWORK_NAME }}
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1): ROUTER_TEMPLATE_NAME := {{ tpl .Values.ROUTER_TEMPLATE_NAME . }}
+
+$(CHARTS_DIR)/$(CLOSEST_TAG)/$(1): $(KUSTOMIZE) $(ENVSUBST)
+	install -m u=rwx,go=rx -d $(CHARTS_DIR)/$(CLOSEST_TAG)/$(1)
+	cp -rf helm/$(1) $(CHARTS_DIR)/$(CLOSEST_TAG)/.
+	$(KUSTOMIZE) build kustomize/$(2) | $(ENVSUBST) \
+	| install -m u=rw,go=r -D /dev/fd/0 $(CHARTS_DIR)/$(CLOSEST_TAG)/$(1)/templates/opennebula-cpi.yaml
+endef
+
+$(eval $(call chart-generator-tool,opennebula-cpi,base))
+
 # Deployment
 
 ifndef ignore-not-found
 ignore-not-found := false
 endif
 
-.PHONY: deploy undeploy
+.PHONY: deploy-kadm undeploy-kadm deploy-rke2 undeploy-rke2
 
-deploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) apply -f-
+# Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy-kadm deploy-rke2: deploy-%: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL)
+	$(KUSTOMIZE) build kustomize/$*/ | $(ENVSUBST) | $(KUBECTL) apply -f-
 
-undeploy: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) # Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build kustomize/base/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
+# Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+undeploy-kadm undeploy-rke2: undeploy-%: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL)
+	$(KUSTOMIZE) build kustomize/$*/ | $(ENVSUBST) | $(KUBECTL) --ignore-not-found=$(ignore-not-found) delete -f-
 
 # Dependencies
 
-.PHONY: envsubst kubectl kustomize
+.PHONY: envsubst helm kubectl kustomize
 
 envsubst: $(ENVSUBST)
 $(ENVSUBST):
 	$(call go-install-tool,$(ENVSUBST),github.com/a8m/envsubst/cmd/envsubst,v$(ENVSUBST_VERSION))
+
+helm: $(HELM)
+$(HELM):
+	@[ -f $@-v$(HELM_VERSION) ] || \
+	{ curl -fsSL https://get.helm.sh/helm-v$(HELM_VERSION)-linux-amd64.tar.gz \
+	| tar -xzO -f- linux-amd64/helm \
+	| install -m u=rwx,go= -o $(USER) -D /dev/fd/0 $@-v$(HELM_VERSION); }
+	@ln -sf $@-v$(HELM_VERSION) $@
 
 kubectl: $(KUBECTL)
 $(KUBECTL):

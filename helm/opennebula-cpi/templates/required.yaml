@@ -1,0 +1,1 @@
+{{- $_ := required "CLUSTER_NAME must be provided" .Values.CLUSTER_NAME -}}

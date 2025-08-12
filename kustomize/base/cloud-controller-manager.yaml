@@ -64,7 +64,7 @@ spec:
             - --cloud-config=/etc/one/config.yaml
             - --leader-elect=true
             - --use-service-account-credentials
-            - --controllers=cloud-node,cloud-node-lifecycle,service-lb-controller
+            - --controllers=${CCM_CTL:=cloud-node,cloud-node-lifecycle,service-lb-controller}
           volumeMounts:
             - name: cloud-config
               mountPath: /etc/one/
@@ -84,9 +84,7 @@ spec:
         - key: node-role.kubernetes.io/master
           operator: Exists
           effect: NoSchedule
-        # TODO: remove this one later!
         - key: node.kubernetes.io/not-ready
           operator: Exists
           effect: NoSchedule
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
+      nodeSelector: ${NODE_SELECTOR}
