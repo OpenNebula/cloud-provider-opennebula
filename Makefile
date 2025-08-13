@@ -51,6 +51,7 @@ IMAGE_NAMES := cloud-provider-opennebula opennebula-csi-plugin
 export
 
 include Makefile.dev.mk
+include benchmark/csi/Makefile.bench.mk
 
 .PHONY: all clean
 

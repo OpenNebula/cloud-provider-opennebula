@@ -8,13 +8,11 @@ KIND_VERSION            	?= 0.29.0
 CTLPTL_VERSION         		?= 0.8.42
 CLUSTERCTL_VERSION       	?= 1.10.3
 CAPONE_VERSION 			 	?= 0.1.7
-KUBECTL_VERSION          	?= 1.31.4
 
 TILT	  		:= $(SELF)/bin/tilt
 KIND          	:= $(SELF)/bin/kind
 CTLPTL         	:= $(SELF)/bin/ctlptl
 CLUSTERCTL     	:= $(SELF)/bin/clusterctl
-KUBECTL			:= $(SELF)/bin/kubectl
 
 define CLUSTER_NODES_USERDATA
 install -m u=rw,go=r -D /dev/fd/0 /etc/containerd/certs.d/$(LOCAL_REGISTRY)/hosts.toml <<EOF
