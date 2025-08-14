@@ -28,18 +28,25 @@ import (
 )
 
 type InstancesV2 struct {
-	ctrl *goca.Controller
+	Disabled bool
+	ctrl     *goca.Controller
 }
 
-func NewInstancesV2(cfg OpenNebulaConfig) (cloudprovider.InstancesV2, error) {
+func NewInstancesV2(cfg OpenNebulaConfig) (*InstancesV2, error) {
 	ctrl := goca.NewController(goca.NewDefaultClient(goca.OneConfig{
 		Endpoint: cfg.Endpoint.ONE_XMLRPC,
 		Token:    cfg.Endpoint.ONE_AUTH,
 	}))
-	return &InstancesV2{ctrl}, nil
+	return &InstancesV2{
+		Disabled: false,
+		ctrl:     ctrl,
+	}, nil
 }
 
 func (i2 *InstancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bool, error) {
+	if i2.Disabled {
+		return false, fmt.Errorf("InstancesV2 disabled")
+	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return false, err
@@ -48,6 +55,9 @@ func (i2 *InstancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (b
 }
 
 func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (bool, error) {
+	if i2.Disabled {
+		return false, fmt.Errorf("InstancesV2 disabled")
+	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return false, err
@@ -70,6 +80,9 @@ func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) 
 }
 
 func (i2 *InstancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceMetadata, error) {
+	if i2.Disabled {
+		return nil, fmt.Errorf("InstancesV2 disabled")
+	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
 		return nil, err

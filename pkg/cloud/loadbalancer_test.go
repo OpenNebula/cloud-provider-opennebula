@@ -333,7 +333,7 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 					if err != nil {
 						s.T().Log(err)
 					}
-					return err == nil || err.Error() == "lb class unexpected"
+					return err == nil || err.Error() == "LoadBalancer class unexpected"
 				})
 			} else {
 				retryF(defaultRetries, func() bool {
@@ -341,7 +341,7 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 					if err != nil {
 						s.T().Log(err)
 					}
-					return err == nil || err.Error() == "lb class unexpected"
+					return err == nil || err.Error() == "LoadBalancer class unexpected"
 				})
 			}
 		}
@@ -354,7 +354,7 @@ func (s *CPTestSuite) testLB(name string, steps []lbStep) {
 				if err != nil {
 					s.T().Log(err)
 				}
-				return err == nil || err.Error() == "lb class unexpected"
+				return err == nil || err.Error() == "LoadBalancer class unexpected"
 			})
 		}
 	}

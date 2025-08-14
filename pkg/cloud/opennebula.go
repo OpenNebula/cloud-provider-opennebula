@@ -29,8 +29,8 @@ const (
 )
 
 type OpenNebula struct {
-	instancesV2  cloudprovider.InstancesV2
-	loadBalancer cloudprovider.LoadBalancer
+	instancesV2  *InstancesV2
+	loadBalancer *LoadBalancer
 }
 
 type Config struct {
@@ -104,7 +104,7 @@ func (one *OpenNebula) Initialize(builder cloudprovider.ControllerClientBuilder,
 }
 
 func (one *OpenNebula) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return one.loadBalancer, true
+	return one.loadBalancer, !one.loadBalancer.Disabled
 }
 
 func (one *OpenNebula) Instances() (cloudprovider.Instances, bool) {
@@ -112,7 +112,7 @@ func (one *OpenNebula) Instances() (cloudprovider.Instances, bool) {
 }
 
 func (one *OpenNebula) InstancesV2() (cloudprovider.InstancesV2, bool) {
-	return one.instancesV2, true
+	return one.instancesV2, !one.instancesV2.Disabled
 }
 
 func (one *OpenNebula) Zones() (cloudprovider.Zones, bool) {
