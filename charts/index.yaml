@@ -1,3 +1,14 @@
 apiVersion: v1
-entries: {}
-generated: "2025-08-11T20:21:22.00000000+02:00"
+entries:
+  opennebula-cpi:
+  - apiVersion: v2
+    appVersion: v0.1.2
+    created: "2025-08-14T13:14:22.893289201Z"
+    description: OpenNebula Cloud-Provider Interface Chart
+    digest: 659ef7e98edb2101431b806c2b715db3749201e6b71db1d416b04823f0fbdcf1
+    name: opennebula-cpi
+    type: application
+    urls:
+    - https://opennebula.github.io/cloud-provider-opennebula/charts/opennebula-cpi-0.1.2.tgz
+    version: 0.1.2
+generated: "2025-08-14T13:14:22.892744135Z"
