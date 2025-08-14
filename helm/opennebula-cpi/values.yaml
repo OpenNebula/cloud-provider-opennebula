@@ -1,0 +1,19 @@
+---
+CCM_IMG: "ghcr.io/opennebula/cloud-provider-opennebula:{{ .Chart.AppVersion }}"
+CCM_CTL: cloud-node,cloud-node-lifecycle,service-lb-controller
+
+CLUSTER_NAME: null # MUST be provided
+
+ONE_XMLRPC: "http://127.0.0.1:2633/RPC2"
+ONE_AUTH: "oneadmin:opennebula"
+
+PUBLIC_NETWORK_NAME: service
+PRIVATE_NETWORK_NAME: private
+
+ROUTER_TEMPLATE_NAME: "{{ .Values.CLUSTER_NAME }}-router"
+
+nodeSelector:
+  # kadm
+  node-role.kubernetes.io/control-plane: ""
+  # rke2
+  #node-role.kubernetes.io/control-plane: "true"
