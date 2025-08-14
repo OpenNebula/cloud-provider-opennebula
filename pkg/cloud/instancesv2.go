@@ -45,7 +45,7 @@ func NewInstancesV2(cfg OpenNebulaConfig) (*InstancesV2, error) {
 
 func (i2 *InstancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bool, error) {
 	if i2.Disabled {
-		return false, fmt.Errorf("i2 disabled")
+		return false, fmt.Errorf("InstancesV2 disabled")
 	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
@@ -56,7 +56,7 @@ func (i2 *InstancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (b
 
 func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (bool, error) {
 	if i2.Disabled {
-		return false, fmt.Errorf("i2 disabled")
+		return false, fmt.Errorf("InstancesV2 disabled")
 	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
@@ -81,7 +81,7 @@ func (i2 *InstancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) 
 
 func (i2 *InstancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceMetadata, error) {
 	if i2.Disabled {
-		return nil, fmt.Errorf("i2 disabled")
+		return nil, fmt.Errorf("InstancesV2 disabled")
 	}
 	vm, err := i2.byUUID(ctx, node.Status.NodeInfo.SystemUUID)
 	if err != nil {
