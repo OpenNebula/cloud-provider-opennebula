@@ -68,7 +68,7 @@ build: fmt vet
 docker-build:
 	$(CONTAINER_TOOL) build -t $(CCM_IMG) .
 
-docker-push:
+docker-push: docker-build
 	$(CONTAINER_TOOL) push $(CCM_IMG)
 
 # _PLATFORMS defines the target platforms for the manager image be built to provide support to multiple architectures.

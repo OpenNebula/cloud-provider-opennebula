@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
 
 	goca "github.com/OpenNebula/one/src/oca/go/src/goca"
@@ -34,21 +33,29 @@ import (
 )
 
 type LoadBalancer struct {
+	Disabled       bool
 	ctrl           *goca.Controller
 	publicNetwork  *ONEVirtualNetwork
 	privateNetwork *ONEVirtualNetwork
 	virtualRouter  *ONEVirtualRouter
 }
 
-func NewLoadBalancer(cfg OpenNebulaConfig) (cloudprovider.LoadBalancer, error) {
+func NewLoadBalancer(cfg OpenNebulaConfig) (*LoadBalancer, error) {
+	disabled := false
+	if cfg.PublicNetwork == nil && cfg.PrivateNetwork == nil {
+		klog.Errorf("no networks defined, disabling lb support")
+		disabled = true
+	}
+	if cfg.VirtualRouter == nil || len(strings.TrimSpace(cfg.VirtualRouter.TemplateName)) == 0 {
+		klog.Errorf("no vr template defined, disabling lb support")
+		disabled = true
+	}
 	ctrl := goca.NewController(goca.NewDefaultClient(goca.OneConfig{
 		Endpoint: cfg.Endpoint.ONE_XMLRPC,
 		Token:    cfg.Endpoint.ONE_AUTH,
 	}))
-	if cfg.PublicNetwork == nil && cfg.PrivateNetwork == nil {
-		return nil, fmt.Errorf("no networks defined")
-	}
 	return &LoadBalancer{
+		Disabled:       disabled,
 		ctrl:           ctrl,
 		publicNetwork:  cfg.PublicNetwork,
 		privateNetwork: cfg.PrivateNetwork,
@@ -91,6 +98,9 @@ func (lb *LoadBalancer) findLoadBalancer(ctx context.Context, clusterName, lbNam
 func (lb *LoadBalancer) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (*corev1.LoadBalancerStatus, bool, error) {
 	klog.Infof("GetLoadBalancer(): %s", clusterName)
 
+	if lb.Disabled {
+		return nil, false, fmt.Errorf("lb disabled")
+	}
 	if service.Spec.LoadBalancerClass != nil {
 		return nil, false, nil
 	}
@@ -407,6 +417,9 @@ func (lb *LoadBalancer) updateVirtualRouterInstances(ctx context.Context, vr *go
 func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	klog.Infof("EnsureLoadBalancer(): %s", clusterName)
 
+	if lb.Disabled {
+		return nil, fmt.Errorf("lb disabled")
+	}
 	if service.Spec.LoadBalancerClass != nil {
 		return nil, fmt.Errorf("lb class unexpected")
 	}
@@ -438,6 +451,9 @@ func (lb *LoadBalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	klog.Infof("UpdateLoadBalancer(): %s", clusterName)
 
+	if lb.Disabled {
+		return fmt.Errorf("lb disabled")
+	}
 	if service.Spec.LoadBalancerClass != nil {
 		return fmt.Errorf("lb class unexpected")
 	}
@@ -469,6 +485,9 @@ func (lb *LoadBalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 func (lb *LoadBalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
 	klog.Infof("EnsureLoadBalancerDeleted(): %s", clusterName)
 
+	if lb.Disabled {
+		return fmt.Errorf("lb disabled")
+	}
 	if service.Spec.LoadBalancerClass != nil {
 		return fmt.Errorf("lb class unexpected")
 	}
