@@ -29,6 +29,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 ## Author Information
 
-Copyright 2002-2024, OpenNebula Project, OpenNebula Systems
+Copyright 2002-2025, OpenNebula Project, OpenNebula Systems
 
 ## Acknowledgments
+
+Some of the software features included in this repository have been made possible through the funding of the following innovation project: [ONEedge5G](https://opennebula.io/innovation/oneedge5g/).
