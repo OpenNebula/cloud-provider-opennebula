@@ -1,0 +1,58 @@
+# -*- mode: Python -*-
+load('ext://restart_process', 'docker_build_with_restart')
+
+DEFAULT_DEBUG_PORT = "5000"
+
+local_resource(
+  name='opennebula-cloud-controller-manager-bin',
+  dir='..',
+  cmd='CGO_ENABLED=0 go build -gcflags "-N -l" -o ./tilt/build/opennebula-cloud-controller-manager ./cmd/opennebula-cloud-controller-manager/main.go',
+  deps=[
+    '../cmd/opennebula-cloud-controller-manager/main.go',
+    '../pkg/cloud',
+    '../go.mod',
+    '../go.sum'
+  ]
+)
+
+docker_build_with_restart(
+    ref=os.getenv('LOCAL_REGISTRY')+'/opennebula-cloud-controller-manager',
+    context='..',
+    dockerfile='Dockerfile.debug',
+    only=[
+        'tilt/build/opennebula-cloud-controller-manager',
+        'Dockerfile.debug'
+    ],
+    build_args={
+        'DEBUG_PORT': os.getenv('DEBUG_PORT', DEFAULT_DEBUG_PORT),  # Default to 5000 if not set
+    },
+    live_update=[
+        sync(local_path='./tilt/build/opennebula-cloud-controller-manager', remote_path='/app'),
+    ],
+    entrypoint=[
+        'dlv',
+        '--listen=0.0.0.0:' + os.getenv('DEBUG_PORT', DEFAULT_DEBUG_PORT),
+        '--api-version=2',
+        '--headless=true',
+        'exec',
+        '/app/opennebula-cloud-controller-manager',
+        #'--continue',
+        #'--accept-multiclient',
+        '--'
+    ],
+)
+
+# Deploy to workload cluster
+yaml = helm('../_charts/'+os.getenv('CLOSEST_TAG')+'/opennebula-cpi',
+    name='opennebula-cpi',
+    set=[
+        'CCM_IMG=' + os.getenv('LOCAL_REGISTRY') + '/opennebula-cloud-controller-manager',
+        'ONE_XMLRPC=' + os.getenv('ONE_XMLRPC'),
+        'ONE_AUTH=' + os.getenv('ONE_AUTH'),
+        'CLUSTER_NAME=' + os.getenv('CLUSTER_NAME'),
+        'PUBLIC_NETWORK_NAME=' + os.getenv('PUBLIC_NETWORK_NAME'),
+        'PRIVATE_NETWORK_NAME=' + os.getenv('PRIVATE_NETWORK_NAME'),
+    ]
+)
+allow_k8s_contexts(os.getenv('WORKLOAD_CLUSTER_NAME') + '-admin@' + os.getenv('WORKLOAD_CLUSTER_NAME')) #for safety reasons
+k8s_yaml(yaml)

@@ -59,6 +59,7 @@ spec:
           image: "${CCM_IMG}"
           command:
             - /opennebula-cloud-controller-manager
+          args:
             - --cloud-provider=opennebula
             - --cluster-name=${CLUSTER_NAME}
             - --cloud-config=/etc/one/config.yaml

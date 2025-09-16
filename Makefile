@@ -42,6 +42,8 @@ CONTAINER_TOOL ?= docker
 -include .env
 export
 
+include Makefile.dev.mk
+
 .PHONY: all clean
 
 all: build
