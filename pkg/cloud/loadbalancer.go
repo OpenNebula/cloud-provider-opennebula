@@ -128,6 +128,14 @@ func (lb *LoadBalancer) getVRReservationName(clusterName string) string {
 	return fmt.Sprintf("%s-vr", clusterName)
 }
 
+func (lb *LoadBalancer) getVRReservationID(ctx context.Context, clusterName string) (int, error) {
+	return lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getVRReservationName(clusterName))
+}
+
+func (lb *LoadBalancer) getPrivateNetworkID(ctx context.Context) (int, error) {
+	return lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.privateNetwork.Name)
+}
+
 func (lb *LoadBalancer) getPrimaryNetwork() *ONEVirtualNetwork {
 	if lb.publicNetwork != nil {
 		return lb.publicNetwork
@@ -137,7 +145,7 @@ func (lb *LoadBalancer) getPrimaryNetwork() *ONEVirtualNetwork {
 }
 
 func (lb *LoadBalancer) ensureVRReservationCreated(ctx context.Context, clusterName string) (*goca_vn.VirtualNetwork, error) {
-	vnID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getVRReservationName(clusterName))
+	vnID, err := lb.getVRReservationID(ctx, clusterName)
 	if err != nil && err.Error() != "resource not found" {
 		return nil, err
 	}
@@ -242,14 +250,22 @@ func (lb *LoadBalancer) ensureVirtualRouterCreated(ctx context.Context, clusterN
 		// Overwrite NIC 0 or 0 and 1, leave others intact.
 		nicIndex := -1
 		if lb.publicNetwork != nil {
+			reservationID, err := lb.getVRReservationID(ctx, clusterName)
+			if err != nil {
+				return nil, err
+			}
 			nicIndex++
 			nicVec := ensureNIC(vrTemplate, nicIndex)
-			nicVec.AddPair("NETWORK", lb.getVRReservationName(clusterName))
+			nicVec.AddPair("NETWORK_ID", reservationID)
 		}
 		if lb.privateNetwork != nil {
+			privateID, err := lb.getPrivateNetworkID(ctx)
+			if err != nil {
+				return nil, err
+			}
 			nicIndex++
 			nicVec := ensureNIC(vrTemplate, nicIndex)
-			nicVec.AddPair("NETWORK", lb.privateNetwork.Name)
+			nicVec.AddPair("NETWORK_ID", privateID)
 			nicVec.AddPair("FLOATING_IP", "YES")
 			if lb.privateNetwork.FloatingIP != nil && net.ParseIP(*lb.privateNetwork.FloatingIP) != nil {
 				nicVec.AddPair("IP", *lb.privateNetwork.FloatingIP)
@@ -541,7 +557,7 @@ func (lb *LoadBalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 			}
 		}
 
-		if vnID, err := lb.ctrl.VirtualNetworks().ByNameContext(ctx, lb.getVRReservationName(clusterName)); err != nil {
+		if vnID, err := lb.getVRReservationID(ctx, clusterName); err != nil {
 			klog.Error(err)
 		} else {
 			if err = lb.ctrl.VirtualNetwork(vnID).DeleteContext(ctx); err != nil {
